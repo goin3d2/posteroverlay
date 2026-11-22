@@ -232,3 +232,12 @@ def test_preview_sample_includes_seasons(ctx, emby, web):
     run_overlays(ctx, "e1", Job("t"))
     files = set(os.listdir(os.path.join(ctx.config_dir, "preview", "e1")))
     assert {f"{s1}.jpg", f"{s2}.jpg", f"{m1b}.jpg"} <= files
+
+
+def test_unticked_movies_are_not_read(ctx, emby, web):
+    m1, m1b, m2, show, s1, s2 = emby_library(emby)
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN), movies=False)
+    res = run_overlays(ctx, "e1", Job("t"))
+    assert "updated 3 posters" in res, res      # the show and its 2 seasons
+    assert not is_ours(emby.images[m1])
+    assert ctx.store.get_prefix("q:e1:") and not any(k.startswith(f"{m1}|") for k in ctx.store.get_prefix("q:e1:"))

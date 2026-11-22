@@ -79,6 +79,13 @@ class OverlayRun:
             kept = {sh.id for sh in shows}
             seasons = [se for se in seasons if se.parent in kept]
             self.log(f"{self.server.name}: {before - len(movies) - len(shows)} titles skipped by folder")
+        # Only gather data for what will be drawn (Posters → Which posters).
+        if not s.movies:
+            movies = []
+        if not (s.series or s.seasons):
+            shows, seasons = [], []
+        if not s.seasons and not s.series:
+            seasons = []
         self.by_id = {i.id: i for i in movies + shows + seasons}
         sampled = self.dry_run and not self.only
         if sampled:
