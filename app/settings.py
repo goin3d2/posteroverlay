@@ -221,6 +221,8 @@ class Settings(BaseModel):
     xtream_categories_path: str = "/xtreamfs/categories.json"
     # Originals are kept at most this wide (pixels); posters are drawn and uploaded at that size.
     original_max_width: int = 1000
+    # Posters drawn and uploaded at the same time.
+    overlay_workers: int = 4
     style: Style = Field(default_factory=Style)
     collections: List[CollectionDef] = Field(default_factory=list)
 

@@ -9,7 +9,7 @@ A web UI on port **8095** lets you set the look with a live preview, manage coll
 
 ## Safety
 
-- **Preview only is the default.** A run works everything out and saves poster previews in `/config/preview/`, but nothing is sent to Emby or Plex until you turn on *Settings → Apply changes to servers*.
+- **Preview only is the default.** A run works everything out, counts what would change and draws a sample of 200 posters per server in `/config/preview/`, but nothing is sent to Emby or Plex until you turn on *Settings → Apply changes to servers*. Scheduled runs only start once changes are applied.
 - **Originals are kept.** Before the first overlay, the untouched poster is saved under `/config/originals/`. Style changes are always redrawn from that original, never on top of an old overlay. If you (or a metadata refresh) put a new poster on a title, the new one becomes the original.
 - Every poster written carries a hidden marker, so one of our own posters is never mistaken for an original.
 - **Servers → Restore original posters** puts every original back.

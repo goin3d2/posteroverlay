@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import threading
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple
 
 from .context import Context, Job
@@ -25,6 +27,7 @@ from .settings import QualityRule, ServerConfig, Settings
 
 EPISODE_SAMPLE = 60
 PER_SHOW_LIMIT = 300
+PREVIEW_LIMIT = 200
 DAY = 86400
 
 
@@ -49,6 +52,7 @@ class OverlayRun:
         self.server: MediaServer = make_server(cfg)
         self.store = ctx.store
         self.counts = defaultdict(int)
+        self._count_lock = threading.Lock()
         self.max_width = max(400, int(self.settings.original_max_width or 1000))
         self.by_id: Dict[str, Item] = {}
         # Another server whose originals we draw on (same title matched by ids).
@@ -56,6 +60,7 @@ class OverlayRun:
         self.source_cfg = src if src and src.enabled and src.url and src.token else None
         self.source: Optional[MediaServer] = make_server(self.source_cfg) if self.source_cfg else None
         self._source_index: Optional[Dict[tuple, Item]] = None
+        self._index_lock = threading.Lock()
 
     # ------------------------------------------------------------------ data
     def gather(self) -> Tuple[List[Item], List[Item], Dict[str, dict]]:
@@ -353,22 +358,39 @@ class OverlayRun:
         style_key = specs.style_hash(self.style, self.ctx.icons.generation())
         job.phase = "posters (preview only)" if self.dry_run else "posters"
         job.total, job.done = len(targets), 0
-        for it in targets:
+        # Preview runs draw a spread of PREVIEW_LIMIT posters to look at and only count the rest.
+        drawn: set = set()
+        if self.dry_run:
+            step = max(1, len(targets) // PREVIEW_LIMIT)
+            drawn = {t.id for t in targets[::step][:PREVIEW_LIMIT]}
+        lock = threading.Lock()
+
+        def work(it: Item) -> None:
             if job.cancel.is_set():
-                self.log("Stopped")
-                break
-            job.done += 1
+                return
             kind = {"movie": "movie", "show": "show", "season": "season"}[it.kind]
             spec = specs.build(data.get(it.id), kind, self.style)
             key = f"{style_key}|{spec.content_key()}" if not spec.empty else ""
             try:
-                self._one(it, spec, key)
+                self._one(it, spec, key, draw=not self.dry_run or it.id in drawn)
             except ServerError as e:
-                self.counts["failed"] += 1
+                self._count("failed")
                 self.log(f"{it.title}: {e}", "warn")
             except Exception as e:  # noqa: BLE001
-                self.counts["failed"] += 1
+                self._count("failed")
                 self.log(f"{it.title}: {type(e).__name__}: {e}", "warn")
+            with lock:
+                job.done += 1
+
+        workers = max(1, min(16, int(self.settings.overlay_workers or 1)))
+        if workers == 1:
+            for it in targets:
+                work(it)
+        else:
+            with ThreadPoolExecutor(workers, thread_name_prefix="poster") as pool:
+                list(pool.map(work, targets))
+        if job.cancel.is_set():
+            self.log("Stopped")
         c = self.counts
         verb = "would update" if self.dry_run else "updated"
         summary = (f"{self.server.name}: {verb} {c['updated']} posters, {c['unchanged']} unchanged, "
@@ -376,27 +398,32 @@ class OverlayRun:
         if self.source_cfg:
             summary += f"; {c['from_source']} drawn on {self.source_cfg.name}'s original"
         if self.dry_run:
-            summary += ". Preview only: nothing was sent to the server (turn on \"Apply changes to servers\")."
+            summary += (f". Preview only: nothing was sent to the server; {len(drawn)} sample posters drawn in preview/ "
+                        "(turn on \"Apply changes to servers\").")
         self.log(summary)
         return summary
 
+    def _build_source_index(self) -> None:
+        self.log(f"Reading {self.source_cfg.name} titles to use its original posters")
+        idx: Dict[tuple, Item] = {}
+        items = self.source.items()
+        for x in items:
+            for prov in ("imdb", "tmdb", "tvdb"):
+                if x.ids.get(prov):
+                    idx.setdefault((x.kind, prov, x.ids[prov]), x)
+        try:
+            for se in self.source.all_seasons():
+                if se.index is not None:
+                    idx.setdefault(("season", se.parent, se.index), se)
+        except ServerError as e:
+            self.log(f"{self.source_cfg.name} seasons not read: {e}", "warn")
+        self._source_index = idx
+
     def _match_source(self, it: Item) -> Optional[Item]:
         """The same title (or season) on the source server, matched by IMDb/TMDB/TVDB id."""
-        if self._source_index is None:
-            self.log(f"Reading {self.source_cfg.name} titles to use its original posters")
-            idx: Dict[tuple, Item] = {}
-            items = self.source.items()
-            for x in items:
-                for prov in ("imdb", "tmdb", "tvdb"):
-                    if x.ids.get(prov):
-                        idx.setdefault((x.kind, prov, x.ids[prov]), x)
-            try:
-                for se in self.source.all_seasons():
-                    if se.index is not None:
-                        idx.setdefault(("season", se.parent, se.index), se)
-            except ServerError as e:
-                self.log(f"{self.source_cfg.name} seasons not read: {e}", "warn")
-            self._source_index = idx
+        with self._index_lock:
+            if self._source_index is None:
+                self._build_source_index()
         idx = self._source_index
         if it.kind == "season":
             show = self.by_id.get(it.parent)
@@ -439,7 +466,11 @@ class OverlayRun:
     def _original_path(self, item_id: str) -> str:
         return self.ctx.path("originals", self.cfg.id, f"{item_id}.img")
 
-    def _one(self, it: Item, spec: specs.Spec, key: str) -> None:
+    def _count(self, name: str) -> None:
+        with self._count_lock:
+            self.counts[name] += 1
+
+    def _one(self, it: Item, spec: specs.Spec, key: str, draw: bool = True) -> None:
         row = self.store.poster(self.cfg.id, it.id) or {}
         ours_now = row.get("applied_marker") and it.marker == row.get("applied_marker")
 
@@ -451,13 +482,16 @@ class OverlayRun:
                         marker = self.server.upload_poster(it.id, f.read(), _ctype(row["original_file"]))
                     self.store.save_poster(self.cfg.id, it.id, applied_key="", applied_marker=marker,
                                            original_marker=marker)
-                self.counts["restored"] += 1
+                self._count("restored")
             else:
-                self.counts["unchanged"] += 1
+                self._count("unchanged")
             return
 
         if ours_now and row.get("applied_key") == key:
-            self.counts["unchanged"] += 1
+            self._count("unchanged")
+            return
+        if not draw:
+            self._count("updated")
             return
 
         original = None
@@ -470,7 +504,7 @@ class OverlayRun:
                     orig_path = src_path
                     self.store.save_poster(self.cfg.id, it.id, title=it.title, original_file=src_path,
                                            original_marker=it.marker)
-                self.counts["from_source"] += 1
+                self._count("from_source")
         if original is not None:
             pass
         elif orig_path and os.path.exists(orig_path) and (ours_now or it.marker == row.get("original_marker")):
@@ -478,7 +512,7 @@ class OverlayRun:
                 original = f.read()
         else:
             if not it.marker:
-                self.counts["skipped"] += 1
+                self._count("skipped")
                 return
             current = self.server.get_poster(it.id)
             if renderer.is_ours(current):
@@ -488,7 +522,7 @@ class OverlayRun:
                 else:
                     self.log(f"{it.title}: the poster on the server is one of ours but the original is missing; skipped",
                              "warn")
-                    self.counts["skipped"] += 1
+                    self._count("skipped")
                     return
             else:
                 original = _shrink(current, self.max_width)
@@ -509,7 +543,7 @@ class OverlayRun:
         else:
             marker = self.server.upload_poster(it.id, jpeg)
             self.store.save_poster(self.cfg.id, it.id, title=it.title, applied_key=key, applied_marker=marker)
-        self.counts["updated"] += 1
+        self._count("updated")
 
 
 def _shrink(data: bytes, max_width: int) -> bytes:

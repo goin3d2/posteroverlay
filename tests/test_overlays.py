@@ -199,3 +199,14 @@ def test_skip_paths(ctx, emby, web):
     setup(ctx, srv)
     run_overlays(ctx, "e1", Job("t"))
     assert not is_ours(emby.images[vod]) and is_ours(emby.images[m2])
+
+
+def test_preview_draws_only_a_sample(ctx, emby, web, monkeypatch):
+    import app.overlays as ov
+    monkeypatch.setattr(ov, "PREVIEW_LIMIT", 2)
+    emby_library(emby)
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN), apply=False)
+    res = run_overlays(ctx, "e1", Job("t"))
+    assert "would update 6 posters" in res and "2 sample posters" in res, res
+    assert len(os.listdir(ctx.path("preview", "e1", "x")[:-2])) == 2
+    assert len(os.listdir(os.path.join(ctx.config_dir, "originals", "e1"))) == 2

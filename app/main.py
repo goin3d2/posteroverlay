@@ -364,6 +364,10 @@ def scheduler(stop: threading.Event) -> None:
     while not stop.is_set():
         try:
             s = ctx.settings.get()
+            # Nothing runs by itself in preview mode: a scheduled preview of a whole library only fills the disk.
+            if not s.apply_changes:
+                stop.wait(60)
+                continue
             if s.overlays_enabled and _due("sched:overlays", s.overlay_hours) and _enabled_ids():
                 if ctx.start("overlays", _overlay_job(_enabled_ids())):
                     ctx.store.put("sched:overlays", time.time())
