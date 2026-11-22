@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw
 
 from . import __version__
 from .collections import artwork as art
-from .collections.sources import xtream_categories
+from .collections.sources import CATEGORY_CANDIDATES, find_categories, xtream_categories
 from .collections.sync import run_collections
 from .context import Context, Job
 from .overlays import restore_all, run_overlays
@@ -345,7 +345,9 @@ def collection_artwork(cid: str):
 @app.get("/api/xtream/categories")
 def xtream():
     path = ctx.settings.get().xtream_categories_path
-    return {"path": path, "found": os.path.exists(path), "categories": xtream_categories(path)}
+    found = find_categories(path)
+    return {"path": path, "found": found or "", "looked_in": [path] + [c for c in CATEGORY_CANDIDATES if c != path],
+            "categories": xtream_categories(path)}
 
 
 @app.get("/api/kometa/search")

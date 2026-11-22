@@ -277,7 +277,7 @@ async function editCollection(id) {
   const c = id ? JSON.parse(JSON.stringify(collections.find((x) => x.id === id))) : {
     name: "", enabled: true, sort_name: "", summary: "", servers: [], sources: [{ type: "mdblist", value: "" }], exclude: [], only_add: false, sort: "Default",
     artwork: { mode: "Auto", url: "", kometa_path: "", tmdb_collection_id: 0, generated_style: "Title", color_top: "#1F2A44", color_bottom: "#0B0F19" } };
-  if (!xtreamCache) xtreamCache = await api("GET", "/api/xtream/categories").catch(() => ({ categories: [] }));
+  if (!xtreamCache || !xtreamCache.categories.length) xtreamCache = await api("GET", "/api/xtream/categories").catch(() => ({ categories: [] }));
   const dlg = $("#dlg"), f = $("#dlg-body"); f.innerHTML = `<h2>${id ? "Edit" : "New"} collection</h2>`;
   f.append(fieldRow(c, ["name", "Name", "text"]), fieldRow(c, ["enabled", "Enabled", "check"]),
     fieldRow(c, ["sort_name", "Sort title", "text", "optional"]), fieldRow(c, ["summary", "Summary", "text", "optional"]),
@@ -315,7 +315,13 @@ function sourceList(title, list) {
     const r = document.createElement("div"); r.className = "src-row";
     const type = document.createElement("select"); SRC_TYPES.forEach(([v, t]) => type.add(new Option(t, v, false, s.type === v)));
     let val;
-    if (s.type === "xtream" && xtreamCache.categories.length) {
+    if (s.type === "xtream" && !xtreamCache.categories.length) {
+      val = document.createElement("div");
+      val.innerHTML = `<input type="text" placeholder="movie:<id> or series:<id>" style="width:100%"><div class="notice" style="margin:6px 0 0">
+        No xtreamfs categories found. The container looked for <code>categories.json</code> in ${(xtreamCache.looked_in || []).map(esc).join(", ")}.
+        In the container settings, map the folder that holds it (xtreamfs's config folder, or the top of its .strm folder) to <code>/xtreamfs</code>, then reopen this editor.</div>`;
+      const inp = $("input", val); inp.value = s.value; inp.oninput = () => { s.value = inp.value; s.label = ""; };
+    } else if (s.type === "xtream") {
       val = document.createElement("select"); val.add(new Option("Choose a category…", ""));
       xtreamCache.categories.forEach((x) => val.add(new Option(`${x.kind === "movie" ? "Movies" : "Series"}: ${x.name} (${x.count})`, x.value, false, x.value === s.value)));
       val.onchange = () => { s.value = val.value; s.label = val.selectedOptions[0].text; };

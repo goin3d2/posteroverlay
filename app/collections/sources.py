@@ -134,8 +134,21 @@ def resolve_tmdb_collection(value: str, key: str) -> SourceResult:
     return res
 
 
+CATEGORY_CANDIDATES = ["/xtreamfs/categories.json", "/xtreamfs/config/categories.json", "/vod/categories.json",
+                       "/strm/categories.json"]
+
+
+def find_categories(path: str) -> Optional[str]:
+    """The configured categories.json, or the first one found where xtreamfs usually writes it."""
+    for p in [path] + [c for c in CATEGORY_CANDIDATES if c != path]:
+        if p and os.path.isfile(p):
+            return p
+    return None
+
+
 def xtream_categories(path: str) -> List[dict]:
-    if not os.path.exists(path):
+    path = find_categories(path)
+    if not path:
         return []
     with open(path, encoding="utf-8") as f:
         doc = json.load(f)
@@ -148,8 +161,11 @@ def xtream_categories(path: str) -> List[dict]:
 
 
 def resolve_xtream(value: str, path: str) -> SourceResult:
-    if not os.path.exists(path):
-        raise RuntimeError(f"No xtreamfs categories.json at {path}. Mount xtreamfs's config folder at /xtreamfs.")
+    found = find_categories(path)
+    if not found:
+        raise RuntimeError(f"No xtreamfs categories.json at {path}. Map the folder that holds it (xtreamfs's config "
+                           "folder, or the top of its .strm folder) to /xtreamfs.")
+    path = found
     kind, _, cid = (value or "").partition(":")
     if not cid:
         raise ValueError(f"xtreamfs category should look like movie:123 or series:45, not '{value}'")

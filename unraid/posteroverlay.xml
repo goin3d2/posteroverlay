@@ -14,7 +14,7 @@
   <Icon>https://raw.githubusercontent.com/goin3d2/posteroverlay/main/unraid/icon.png</Icon>
   <Config Name="Web UI" Target="8095" Default="8095" Mode="tcp" Description="Web interface" Type="Port" Display="always" Required="true" Configurable="true">8095</Config>
   <Config Name="Config" Target="/config" Default="/mnt/user/appdata/posteroverlay" Mode="rw" Description="Settings, database and original posters" Type="Path" Display="always" Required="true" Configurable="true">/mnt/user/appdata/posteroverlay</Config>
-  <Config Name="xtreamfs config" Target="/xtreamfs" Default="/mnt/user/appdata/xtreamfs" Mode="ro" Description="Optional: xtreamfs config folder (categories.json) for xtreamfs collections" Type="Path" Display="always" Required="false" Configurable="true">/mnt/user/appdata/xtreamfs</Config>
+  <Config Name="xtreamfs config" Target="/xtreamfs" Default="/mnt/user/appdata/xtreamfs" Mode="ro" Description="Optional: a folder holding xtreamfs categories.json, either xtreamfs's config folder or the top of its .strm folder" Type="Path" Display="always" Required="false" Configurable="true">/mnt/user/appdata/xtreamfs</Config>
   <Config Name="PUID" Target="PUID" Default="99" Description="User id for files in /config" Type="Variable" Display="advanced" Required="false" Configurable="true">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Description="Group id for files in /config" Type="Variable" Display="advanced" Required="false" Configurable="true">100</Config>
 </Container>

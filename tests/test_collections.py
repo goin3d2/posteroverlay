@@ -188,3 +188,13 @@ def test_label_source(ctx, emby, plex, web):
     run_collections(ctx, Job("c"))
     assert emby.children[boxsets(emby)["Kids"]] == [e["other"]]
     assert plex.children[plex_cols(plex)[("Kids", "1")]] == [p["dune"]]
+
+
+def test_categories_found_in_fallback_location(tmp_path, monkeypatch):
+    from app.collections import sources
+    f = tmp_path / "vod" / "categories.json"
+    f.parent.mkdir()
+    f.write_text(json.dumps({"movies": {"3": {"name": "Action", "items": [{"tmdb": "1"}]}}, "series": {}}))
+    monkeypatch.setattr(sources, "CATEGORY_CANDIDATES", ["/nope/categories.json", str(f)])
+    assert [c["value"] for c in sources.xtream_categories("/xtreamfs/categories.json")] == ["movie:3"]
+    assert sources.resolve_xtream("movie:3", "/xtreamfs/categories.json").refs[0].tmdb == "1"
