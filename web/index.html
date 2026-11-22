@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poster Overlay</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='6' y='2' width='20' height='28' rx='3' fill='%2352B54B'/><rect x='6' y='2' width='20' height='6' rx='2' fill='%231E2130'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo"></span>Poster Overlay <small id="version"></small></div>
+  <nav id="tabs">
+    <button data-tab="status" class="active">Status</button>
+    <button data-tab="posters">Posters</button>
+    <button data-tab="collections">Collections</button>
+    <button data-tab="servers">Servers</button>
+    <button data-tab="settings">Settings</button>
+    <button data-tab="activity">Activity</button>
+  </nav>
+  <div id="mode" class="mode"></div>
+</header>
+
+<main>
+<!-- STATUS -->
+<section id="tab-status" class="tab active">
+  <div id="apply-banner" class="notice hidden"></div>
+  <div class="grid cards" id="status-cards"></div>
+  <h2>Run now</h2>
+  <div class="row wrap">
+    <button class="primary" onclick="runJob('overlays')">Update posters on all servers</button>
+    <button class="primary" onclick="runJob('collections')">Sync all collections</button>
+    <button onclick="runJob('icons')">Download badge icons again</button>
+  </div>
+  <div id="jobs"></div>
+</section>
+
+<!-- POSTERS -->
+<section id="tab-posters" class="tab">
+  <div class="split">
+    <div class="form" id="style-form"></div>
+    <div class="preview-pane">
+      <div class="row">
+        <select id="pv-kind">
+          <option value="movie">Movie</option>
+          <option value="show">Show</option>
+          <option value="season">Season</option>
+        </select>
+        <select id="pv-status">
+          <option>Airing</option><option>Returning</option><option>Ended</option><option>Canceled</option><option>Upcoming</option>
+        </select>
+      </div>
+      <img id="pv-img" alt="Preview">
+      <p class="hint">Sample poster with sample badges. Changes show here right away; press Save to keep them.</p>
+      <div class="row"><button class="primary" onclick="saveStyle()">Save look</button>
+        <button onclick="resetStyle()">Undo changes</button></div>
+      <h3>Preview of the last run</h3>
+      <div class="row"><select id="pv-server"></select><button onclick="loadPreviews()">Show</button></div>
+      <div id="previews" class="thumbs"></div>
+    </div>
+  </div>
+</section>
+
+<!-- COLLECTIONS -->
+<section id="tab-collections" class="tab">
+  <div class="row between">
+    <h2>Collections</h2>
+    <div class="row"><button onclick="editCollection()">New collection</button>
+      <button class="primary" onclick="runJob('collections')">Sync all</button></div>
+  </div>
+  <p class="hint">Each collection is defined once here and kept the same on every server it targets.
+    On Plex one collection is made in each library that has matching titles.</p>
+  <table class="list" id="col-table"></table>
+</section>
+
+<!-- SERVERS -->
+<section id="tab-servers" class="tab">
+  <div class="row between"><h2>Servers</h2>
+    <div class="row"><button onclick="addServer('emby')">Add Emby</button><button onclick="addServer('plex')">Add Plex</button></div></div>
+  <div id="server-list"></div>
+  <div class="row"><button class="primary" onclick="saveSettings()">Save servers</button></div>
+</section>
+
+<!-- SETTINGS -->
+<section id="tab-settings" class="tab">
+  <div class="form narrow" id="general-form"></div>
+  <div class="row"><button class="primary" onclick="saveSettings()">Save settings</button></div>
+</section>
+
+<!-- ACTIVITY -->
+<section id="tab-activity" class="tab">
+  <div class="row between"><h2>Activity</h2>
+    <div class="row"><select id="act-level"><option value="">Everything</option><option value="warn">Warnings and errors</option></select>
+      <button onclick="loadActivity()">Refresh</button></div></div>
+  <div id="activity" class="log"></div>
+</section>
+</main>
+
+<dialog id="dlg"><form method="dialog" id="dlg-body"></form></dialog>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

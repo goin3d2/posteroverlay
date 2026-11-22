@@ -1,0 +1,15 @@
+services:
+  posteroverlay:
+    image: ghcr.io/goin3d2/posteroverlay:latest
+    container_name: posteroverlay
+    restart: unless-stopped
+    ports:
+      - "8095:8095"
+    environment:
+      - TZ=America/New_York
+      - PUID=99
+      - PGID=100
+    volumes:
+      - /mnt/user/appdata/posteroverlay:/config
+      # Optional: xtreamfs config folder, for collections from xtreamfs categories
+      - /mnt/user/appdata/xtreamfs:/xtreamfs:ro

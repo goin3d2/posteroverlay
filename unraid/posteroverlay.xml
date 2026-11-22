@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>posteroverlay</Name>
+  <Repository>ghcr.io/goin3d2/posteroverlay:latest</Repository>
+  <Registry>https://github.com/goin3d2/posteroverlay/pkgs/container/posteroverlay</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/goin3d2/posteroverlay/issues</Support>
+  <Project>https://github.com/goin3d2/posteroverlay</Project>
+  <Overview>Status banners, quality and rating badges on posters, and collections, kept the same on Emby and Plex from one place.</Overview>
+  <Category>MediaApp:Video Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8095]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/goin3d2/posteroverlay/main/unraid/icon.png</Icon>
+  <Config Name="Web UI" Target="8095" Default="8095" Mode="tcp" Description="Web interface" Type="Port" Display="always" Required="true" Configurable="true">8095</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/posteroverlay" Mode="rw" Description="Settings, database and original posters" Type="Path" Display="always" Required="true" Configurable="true">/mnt/user/appdata/posteroverlay</Config>
+  <Config Name="xtreamfs config" Target="/xtreamfs" Default="/mnt/user/appdata/xtreamfs" Mode="ro" Description="Optional: xtreamfs config folder (categories.json) for xtreamfs collections" Type="Path" Display="always" Required="false" Configurable="true">/mnt/user/appdata/xtreamfs</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Description="User id for files in /config" Type="Variable" Display="advanced" Required="false" Configurable="true">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Description="Group id for files in /config" Type="Variable" Display="advanced" Required="false" Configurable="true">100</Config>
+</Container>
