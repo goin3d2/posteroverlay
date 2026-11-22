@@ -213,6 +213,8 @@ class Settings(BaseModel):
     tmdb_key: str = ""
     mdblist_key: str = ""
     mdblist_reserve: int = 100
+    # Most MDBList lookups in one run (0: as many as the daily allowance allows). Keeps runs short.
+    mdblist_per_run: int = 2000
     imdb_dataset: bool = True
     icon_source: str = (
         "https://raw.githubusercontent.com/Kometa-Team/Kometa/"

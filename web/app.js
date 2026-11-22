@@ -81,7 +81,7 @@ async function refreshStatus() {
     card("Collections", status.collections, "defined here"),
     card("Badge icons", `${status.icons.have}/${status.icons.total}`, status.icons.have < status.icons.total ? "some missing; they download on the first run" : "ready"),
     card("IMDb ratings", status.imdb_titles.toLocaleString(), "titles from the IMDb dataset"),
-    card("MDBList", q ? `${Math.max(0, q.limit - q.used)}` : "—", q ? `requests left today of ${q.limit}` : "not used yet"),
+    card("MDBList", q ? `${Math.max(0, q.limit - q.used)}` : "—", q ? `requests left today of ${q.limit}` + (status.mdblist_waiting ? ` · ${status.mdblist_waiting.toLocaleString()} titles waiting for scores` : "") : "not used yet"),
     card("Next poster run", status.schedule.overlays.enabled ? `every ${status.schedule.overlays.hours} h` : "off", "last " + ago(status.schedule.overlays.last)),
     card("Next collection sync", status.schedule.collections.enabled ? `every ${status.schedule.collections.hours} h` : "off", "last " + ago(status.schedule.collections.last)),
   ];
@@ -193,6 +193,7 @@ function renderGeneral() {
     ["tmdb_key", "TMDB API key", "password", "v3 key or v4 read token", "Show status (airing, ended…) and TMDB collections"],
     ["mdblist_key", "MDBList API key", "password", "", "Rotten Tomatoes scores and MDBList lists"],
     ["mdblist_reserve", "Keep this many MDBList requests spare each day", "number"],
+    ["mdblist_per_run", "Most MDBList lookups per run", "number", null, "Keeps runs short; titles not reached get their Rotten Tomatoes scores on later runs. 0: no limit"],
     ["imdb_dataset", "IMDb ratings from the IMDb dataset", "check", null, "Free daily file; saves MDBList requests"],
   ]));
   f.append(fieldset("Files", settings, [

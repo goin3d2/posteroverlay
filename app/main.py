@@ -183,6 +183,7 @@ def status():
                      "posters": counts.get(x.id, {})} for x in s.servers],
         "icons": {"have": have, "total": total},
         "mdblist_quota": ctx.store.get("meta:mdblist_quota"),
+        "mdblist_waiting": sum(int(v or 0) for v in ctx.store.get_prefix("meta:mdblist_waiting:").values()),
         "imdb_titles": ctx.store.count_prefix("imdb:"),
         "schedule": {
             "overlays": {"enabled": s.overlays_enabled, "hours": s.overlay_hours,

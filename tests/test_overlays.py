@@ -210,3 +210,16 @@ def test_preview_draws_only_a_sample(ctx, emby, web, monkeypatch):
     assert "would update 6 posters" in res and "2 sample posters" in res, res
     assert len(os.listdir(ctx.path("preview", "e1", "x")[:-2])) == 2
     assert len(os.listdir(os.path.join(ctx.config_dir, "originals", "e1"))) == 2
+
+
+def test_mdblist_limited_per_run(ctx, emby, web):
+    emby_library(emby)
+    for t in ("tt1", "tt2", "tt3"):
+        web.mdb_titles[f"imdb:{t}"] = [{"source": "tomatoes", "value": 80}]
+    srv = ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN)
+    setup(ctx, srv, apply=False)
+    s = ctx.settings.get(); s.mdblist_per_run = 2; ctx.settings.save(s)
+    run_overlays(ctx, "e1", Job("t"))
+    assert ctx.store.get("meta:mdblist_waiting:e1") == 1
+    run_overlays(ctx, "e1", Job("t"))
+    assert ctx.store.get("meta:mdblist_waiting:e1") == 0

@@ -150,10 +150,12 @@ class OverlayRun:
             return
         today = dt.date.today()
         queue = []
+        seen = set()
         for it, kind in [(m, "movie") for m in movies] + [(s, "show") for s in shows]:
             rk = _ratings_key(it, kind)
-            if not rk:
+            if not rk or rk[0] in seen:
                 continue
+            seen.add(rk[0])
             age = self.store.age(rk[0])
             recent = False
             try:
@@ -171,6 +173,10 @@ class OverlayRun:
         stale = sorted([q for q in queue if not q[0]], key=lambda q: q[2], reverse=True)
         queue = missing + stale
         budget = mdb.start()
+        per_run = int(st.mdblist_per_run or 0)
+        if per_run and budget > per_run:
+            budget = mdb.budget = per_run
+            self.log(f"MDBList: up to {per_run} titles this run; the rest are fetched on later runs")
         self.job.phase = "Rotten Tomatoes ratings"
         self.job.total, self.job.done = min(len(queue), budget), 0
         fetched = 0
@@ -190,6 +196,7 @@ class OverlayRun:
                 fetched += 1
             self.job.done += 1
         self.log(f"MDBList: {fetched} titles updated in {mdb.calls} calls, {len(queue) - fetched} still waiting")
+        self.store.put(f"meta:mdblist_waiting:{self.cfg.id}", len(queue) - fetched)
 
     def _statuses(self, shows: List[Item]) -> Dict[str, str]:
         tmdb = Tmdb(self.settings.tmdb_key)
