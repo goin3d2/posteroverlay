@@ -82,3 +82,15 @@ def test_import_emby_plugin_cache(client):
     assert st.get("tmdbfind:imdb:tt9") == "123"
     assert 1.5 * 86400 < st.age("mdb:movie:imdb:tt1")       # keeps the plugin's fetch date
     assert c.post("/api/import/emby-plugin", content=b"{}").status_code == 400
+
+
+def test_settings_save_never_changes_collections(client):
+    c, main = client
+    stale = c.get("/api/settings").json()
+    made = c.post("/api/collections", json={"name": "Keep", "sources": [{"type": "label", "value": "x"}]}).json()
+    stale["collections"] = [{"name": "Ghost", "sources": []}]
+    c.put("/api/settings", json=stale)
+    assert [x["name"] for x in c.get("/api/collections").json()] == ["Keep"]
+    c.delete(f"/api/collections/{made['id']}")
+    c.put("/api/settings", json=stale)
+    assert c.get("/api/collections").json() == []

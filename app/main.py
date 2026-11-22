@@ -76,7 +76,9 @@ def get_settings():
 @app.put("/api/settings")
 def put_settings(body: dict = Body(...)):
     old = ctx.settings.get()
-    body.setdefault("collections", [c.model_dump(mode="json") for c in old.collections])
+    # Collections are only changed through their own endpoints: a settings page loaded earlier must not bring back
+    # (or drop) collections changed since.
+    body["collections"] = [c.model_dump(mode="json") for c in old.collections]
     try:
         new = Settings.model_validate(body)
     except Exception as e:  # noqa: BLE001
