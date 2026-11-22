@@ -25,8 +25,8 @@ from .servers.base import Item, MediaServer, ServerError
 from .servers.plex import make_server
 from .settings import QualityRule, ServerConfig, Settings
 
-EPISODE_SAMPLE = 60
-PER_SHOW_LIMIT = 300
+EPISODE_SAMPLE = 10
+LIST_WORKERS = 6
 PREVIEW_LIMIT = 200
 DAY = 86400
 
@@ -80,12 +80,24 @@ class OverlayRun:
             seasons = [se for se in seasons if se.parent in kept]
             self.log(f"{self.server.name}: {before - len(movies) - len(shows)} titles skipped by folder")
         self.by_id = {i.id: i for i in movies + shows + seasons}
+        sampled = self.dry_run and not self.only
+        if sampled:
+            # A preview only gathers data for a spread of sample titles, so it takes minutes on any library.
+            n_shows = min(len(shows), PREVIEW_LIMIT // 3) if movies else min(len(shows), PREVIEW_LIMIT)
+            n_movies = min(len(movies), PREVIEW_LIMIT - n_shows)
+            pick = movies[::max(1, len(movies) // max(1, n_movies))][:n_movies] + \
+                shows[::max(1, len(shows) // max(1, n_shows))][:n_shows]
+            self.only = {i.id for i in pick}
+            self.log(f"Preview: {len(movies) + len(shows)} titles in the library; checking a sample of {len(pick)} "
+                     "(and their seasons)")
         if self.only:
             keep = set(self.only) | {se.parent for se in seasons if se.id in self.only}
             vkeys = {m.version_key for m in movies if m.id in keep and m.version_key}
             movies = [m for m in movies if m.id in keep or (m.version_key and m.version_key in vkeys)]
             shows = [sh for sh in shows if sh.id in keep]
             seasons = [se for se in seasons if se.parent in keep]
+            if sampled:
+                self.only = {i.id for i in movies + shows + seasons}
         self.log(f"{self.server.name}: {len(movies)} movies, {len(shows)} shows, {len(seasons)} seasons")
 
         self._ratings(movies, shows)
@@ -273,16 +285,18 @@ class OverlayRun:
         episodes_by_show: Dict[str, List[Item]] = defaultdict(list)
         if shows and (s.show_quality_on_shows or s.seasons):
             self.job.phase = "listing episodes"
-            if len(shows) <= PER_SHOW_LIMIT:
-                # A few shows (a selection, or a small library): ask for each show's episodes.
-                for sh in shows:
-                    try:
-                        episodes_by_show[sh.id] = self.server.episodes_of(sh)
-                    except ServerError as e:
-                        self.log(f"{sh.title}: episodes not listed: {e}", "warn")
-            else:
-                for ep in self.server.all_episodes():
-                    episodes_by_show[ep.parent].append(ep)
+            self.job.total, self.job.done = len(shows), 0
+            # Show by show, several at a time: deep pages of one huge episode listing get slower and slower.
+            def list_eps(sh: Item) -> None:
+                if self.job.cancel.is_set():
+                    return
+                try:
+                    episodes_by_show[sh.id] = self.server.episodes_of(sh)
+                except ServerError as e:
+                    self.log(f"{sh.title}: episodes not listed: {e}", "warn")
+                self.job.done += 1
+            with ThreadPoolExecutor(LIST_WORKERS, thread_name_prefix="episodes") as pool:
+                list(pool.map(list_eps, shows))
         wanted_eps: Dict[str, List[Item]] = {}
         for sh in shows:
             eps = episodes_by_show.get(sh.id, [])
@@ -299,26 +313,32 @@ class OverlayRun:
         if need:
             self.job.phase = "reading media info"
             self.job.total, self.job.done = len(need), 0
-            for i in range(0, len(need), 200):
+            lock = threading.Lock()
+
+            def read(chunk: List[Item]) -> None:
                 if self.job.cancel.is_set():
-                    break
-                chunk = need[i:i + 200]
+                    return
                 try:
                     streams = self.server.file_streams([c.id for c in chunk])
                 except ServerError as e:
                     self.log(str(e), "warn")
                     streams = {}
+                got = {}
                 for c in chunk:
                     files = streams.get(c.id)
-                    if files is None:
-                        continue
-                    q = qc.summarize([qc.classify(f, c.path) for f in files])
-                    fresh[prefix + file_key(c)] = qc.to_dict(q)
-                self.job.done += len(chunk)
-                if len(fresh) >= 1000:
-                    self.store.put_many(fresh)
-                    cache.update({k[len(prefix):]: v for k, v in fresh.items()})
-                    fresh.clear()
+                    if files is not None:
+                        got[prefix + file_key(c)] = qc.to_dict(qc.summarize([qc.classify(f, c.path) for f in files]))
+                with lock:
+                    fresh.update(got)
+                    self.job.done += len(chunk)
+                    if len(fresh) >= 1000:
+                        self.store.put_many(fresh)
+                        cache.update({k[len(prefix):]: v for k, v in fresh.items()})
+                        fresh.clear()
+
+            chunks = [need[i:i + 100] for i in range(0, len(need), 100)]
+            with ThreadPoolExecutor(LIST_WORKERS, thread_name_prefix="mediainfo") as pool:
+                list(pool.map(read, chunks))
             if fresh:
                 self.store.put_many(fresh)
                 cache.update({k[len(prefix):]: v for k, v in fresh.items()})

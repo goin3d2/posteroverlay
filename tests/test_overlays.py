@@ -207,7 +207,8 @@ def test_preview_draws_only_a_sample(ctx, emby, web, monkeypatch):
     emby_library(emby)
     setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN), apply=False)
     res = run_overlays(ctx, "e1", Job("t"))
-    assert "would update 6 posters" in res and "2 sample posters" in res, res
+    assert "2 sample posters" in res, res
+    assert any("checking a sample of" in a["message"] for a in ctx.store.activity())
     assert len(os.listdir(ctx.path("preview", "e1", "x")[:-2])) == 2
     assert len(os.listdir(os.path.join(ctx.config_dir, "originals", "e1"))) == 2
 
@@ -223,3 +224,11 @@ def test_mdblist_limited_per_run(ctx, emby, web):
     assert ctx.store.get("meta:mdblist_waiting:e1") == 1
     run_overlays(ctx, "e1", Job("t"))
     assert ctx.store.get("meta:mdblist_waiting:e1") == 0
+
+
+def test_preview_sample_includes_seasons(ctx, emby, web):
+    m1, m1b, m2, show, s1, s2 = emby_library(emby)
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN), apply=False)
+    run_overlays(ctx, "e1", Job("t"))
+    files = set(os.listdir(os.path.join(ctx.config_dir, "preview", "e1")))
+    assert {f"{s1}.jpg", f"{s2}.jpg", f"{m1b}.jpg"} <= files
