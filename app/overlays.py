@@ -24,6 +24,7 @@ from .servers.plex import make_server
 from .settings import QualityRule, ServerConfig, Settings
 
 EPISODE_SAMPLE = 60
+PER_SHOW_LIMIT = 300
 DAY = 86400
 
 
@@ -58,6 +59,12 @@ class OverlayRun:
         movies = [i for i in items if i.kind == "movie"]
         shows = [i for i in items if i.kind == "show"]
         seasons = self.server.all_seasons() if (s.seasons or s.series) else []
+        if self.only:
+            keep = set(self.only) | {se.parent for se in seasons if se.id in self.only}
+            vkeys = {m.version_key for m in movies if m.id in keep and m.version_key}
+            movies = [m for m in movies if m.id in keep or (m.version_key and m.version_key in vkeys)]
+            shows = [sh for sh in shows if sh.id in keep]
+            seasons = [se for se in seasons if se.parent in keep]
         self.log(f"{self.server.name}: {len(movies)} movies, {len(shows)} shows, {len(seasons)} seasons")
 
         self._ratings(movies, shows)
@@ -238,8 +245,16 @@ class OverlayRun:
         episodes_by_show: Dict[str, List[Item]] = defaultdict(list)
         if shows and (s.show_quality_on_shows or s.seasons):
             self.job.phase = "listing episodes"
-            for ep in self.server.all_episodes():
-                episodes_by_show[ep.parent].append(ep)
+            if len(shows) <= PER_SHOW_LIMIT:
+                # A few shows (a selection, or a small library): ask for each show's episodes.
+                for sh in shows:
+                    try:
+                        episodes_by_show[sh.id] = self.server.episodes_of(sh)
+                    except ServerError as e:
+                        self.log(f"{sh.title}: episodes not listed: {e}", "warn")
+            else:
+                for ep in self.server.all_episodes():
+                    episodes_by_show[ep.parent].append(ep)
         wanted_eps: Dict[str, List[Item]] = {}
         for sh in shows:
             eps = episodes_by_show.get(sh.id, [])

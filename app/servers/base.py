@@ -133,6 +133,10 @@ class MediaServer:
         """Every episode, light: id, .parent = show id, .season, .index, .path (no streams)."""
         raise NotImplementedError
 
+    def episodes_of(self, show: Item) -> List[Item]:
+        """Episodes of one show, same shape as all_episodes()."""
+        return [e for e in self.all_episodes() if e.parent == show.id]
+
     def file_streams(self, item_ids: List[str]) -> Dict[str, List[List[Stream]]]:
         """Streams of each file (version) of the given movies/episodes."""
         raise NotImplementedError

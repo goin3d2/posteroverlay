@@ -141,6 +141,15 @@ class EmbyServer(MediaServer):
                 out.append(item)
         return out
 
+    def episodes_of(self, show: Item) -> List[Item]:
+        out = []
+        for it in self._paged(ParentId=show.id, Recursive="true", IncludeItemTypes="Episode", Fields="Path",
+                              IsMissing="false", EnableImages="false"):
+            item = self._item(it, show.library)
+            item.parent = show.id
+            out.append(item)
+        return out
+
     def file_streams(self, item_ids: List[str]) -> Dict[str, List[List[Stream]]]:
         out: Dict[str, List[List[Stream]]] = {}
         for i in range(0, len(item_ids), 100):

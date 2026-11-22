@@ -172,6 +172,16 @@ class PlexServer(MediaServer):
                 out.append(item)
         return out
 
+    def episodes_of(self, show: Item) -> List[Item]:
+        out = []
+        for m in self._all(f"/library/metadata/{show.id}/allLeaves"):
+            item = self._item(m, show.library)
+            item.parent = show.id
+            parts = [p for media in m.get("Media") or [] for p in media.get("Part") or []]
+            item.path = parts[0].get("file", "") if parts else ""
+            out.append(item)
+        return out
+
     def file_streams(self, item_ids: List[str]) -> Dict[str, List[List[Stream]]]:
         # Plex only returns streams in an item's own metadata: one call per title.
         out: Dict[str, List[List[Stream]]] = {}
