@@ -114,6 +114,23 @@ class Store:
                 self._db.execute("ROLLBACK")
                 raise
 
+    def put_older(self, items: Dict[str, tuple]) -> int:
+        """Insert {key: (value, fetched_time)} unless the cache already has a newer entry. Returns rows written."""
+        with self._lock:
+            before = self._db.total_changes
+            self._db.execute("BEGIN")
+            try:
+                self._db.executemany(
+                    "INSERT INTO kv (k, v, updated) VALUES (?,?,?) "
+                    "ON CONFLICT(k) DO UPDATE SET v=excluded.v, updated=excluded.updated WHERE excluded.updated > kv.updated",
+                    [(k, json.dumps(v), t) for k, (v, t) in items.items()],
+                )
+                self._db.execute("COMMIT")
+            except Exception:
+                self._db.execute("ROLLBACK")
+                raise
+            return self._db.total_changes - before
+
     def get_prefix(self, prefix: str) -> Dict[str, Any]:
         rows = self._q("SELECT k, v FROM kv WHERE k >= ? AND k < ?", (prefix, prefix + "￿"))
         return {r["k"][len(prefix):]: json.loads(r["v"]) for r in rows}

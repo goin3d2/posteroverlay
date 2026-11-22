@@ -9,7 +9,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageDraw
@@ -381,6 +381,25 @@ def scheduler(stop: threading.Event) -> None:
         except Exception:  # noqa: BLE001
             logging.getLogger("posteroverlay").exception("scheduler")
         stop.wait(60)
+
+
+@app.post("/api/import/emby-plugin")
+async def import_emby_plugin(request: Request):
+    """Body: the plugin's overlay-data.json (Emby config folder, plugins/PosterOverlays/)."""
+    import json as _json
+    from .importer import import_plugin_data
+    raw = await request.body()
+    try:
+        data = _json.loads(raw.decode("utf-8-sig"))
+    except ValueError:
+        raise HTTPException(400, "That is not the plugin's overlay-data.json")
+    if not isinstance(data, dict) or "Ratings" not in data:
+        raise HTTPException(400, "That is not the plugin's overlay-data.json")
+    counts = import_plugin_data(data, ctx.store)
+    msg = (f"Imported from the Emby plugin: {counts['ratings']} ratings, {counts['statuses']} show statuses "
+           f"({counts['written']} newer than what was here)")
+    ctx.logger("import")(msg)
+    return {**counts, "message": msg}
 
 
 @app.get("/api/health")

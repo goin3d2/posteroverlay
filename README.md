@@ -46,7 +46,7 @@ Open any item in Plex Web, choose *⋯ → Get Info → View XML*, and copy the 
 
 ### Moving over from the Emby plugins
 
-- **Poster Overlays plugin:** disable or uninstall it before turning on *Apply changes*, or both will draw on Emby's posters. The container warns you if the plugin is still installed. If the plugin already changed posters, use its *Restore originals* first, so the container keeps the real originals.
+- **Poster Overlays plugin:** first use *Settings → Import from the Emby Poster Overlays plugin* with the plugin's `overlay-data.json` (Emby config folder, `plugins/PosterOverlays/`), so the ratings and show statuses it already fetched are reused. Then disable or uninstall it before turning on *Apply changes*, or both will draw on Emby's posters. The container warns you if the plugin is still installed. If the plugin already changed posters, use its *Restore originals* first, so the container keeps the real originals.
 - **Collections plugin:** add the same collections here. Collections with the same name are adopted, so nothing is duplicated. Then disable the plugin's scheduled sync.
 
 ### xtreamfs

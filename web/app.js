@@ -196,6 +196,21 @@ function renderGeneral() {
     ["mdblist_per_run", "Most MDBList lookups per run", "number", null, "Keeps runs short; titles not reached get their Rotten Tomatoes scores on later runs. 0: no limit"],
     ["imdb_dataset", "IMDb ratings from the IMDb dataset", "check", null, "Free daily file; saves MDBList requests"],
   ]));
+  const imp = document.createElement("fieldset");
+  imp.innerHTML = `<legend>Import from the Emby Poster Overlays plugin</legend>
+    <p class="hint">Saves the first run from fetching every rating and show status again. Pick <code>overlay-data.json</code> from Emby's config folder, under <code>plugins/PosterOverlays/</code>.</p>
+    <div class="row"><input type="file" accept=".json,application/json"><button type="button" class="small">Import</button><span class="hint"></span></div>`;
+  const [file, go, out] = [$("input", imp), $("button", imp), $(".row .hint", imp)];
+  go.onclick = async () => {
+    if (!file.files[0]) return toast("Choose overlay-data.json first", true);
+    out.textContent = "Importing…";
+    try {
+      const r = await fetch("/api/import/emby-plugin", { method: "POST", body: file.files[0] });
+      const j = await r.json(); if (!r.ok) throw new Error(j.detail || r.statusText);
+      out.textContent = j.message; refreshStatus();
+    } catch (e) { out.textContent = ""; toast(e.message, true); }
+  };
+  f.append(imp);
   f.append(fieldset("Files", settings, [
     ["xtream_categories_path", "xtreamfs categories.json", "text", "/xtreamfs/categories.json"],
     ["icon_source", "Badge icon source", "url"],

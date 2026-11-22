@@ -59,3 +59,26 @@ def test_collections_crud_and_preview(client):
     st = c.get("/api/status").json()
     assert st["apply_changes"] is False and "overlays" in st["schedule"]
     assert c.get("/").status_code == 200 and "Poster Overlay" in c.get("/").text
+
+
+def test_import_emby_plugin_cache(client):
+    import json as _json
+    c, main = client
+    plugin = {"Version": 1, "Items": {},
+              "Ratings": {"movie:imdb:tt1": {"Imdb": 7.6, "RtCritic": 92, "RtAudience": None, "NotFound": False,
+                                             "FetchedUtc": "2026-11-20T14:50:59.3008466Z"},
+                          "show:tmdb:5": {"NotFound": True, "FetchedUtc": "2026-11-01T00:00:00Z"}},
+              "Status": {"217198": {"TmdbStatus": "Returning Series", "LastAirDate": "2023-01-27T00:00:00Z",
+                                    "FetchedUtc": "2026-11-21T20:41:08.63Z"}},
+              "TmdbIdLookups": {"imdb:tt9": "123"}}
+    main.ctx.store.put("mdb:show:tmdb:5", {"rt_critic": 50})      # newer than the plugin's entry: kept
+    r = c.post("/api/import/emby-plugin", content=("﻿" + _json.dumps(plugin)).encode())
+    assert r.status_code == 200, r.text
+    assert r.json()["ratings"] == 2 and r.json()["statuses"] == 1
+    st = main.ctx.store
+    assert st.get("mdb:movie:imdb:tt1") == {"imdb": 7.6, "rt_critic": 92}
+    assert st.get("mdb:show:tmdb:5") == {"rt_critic": 50}
+    assert st.get("tmdbstatus:217198") == {"status": "Returning Series", "last": "2023-01-27", "next": ""}
+    assert st.get("tmdbfind:imdb:tt9") == "123"
+    assert 1.5 * 86400 < st.age("mdb:movie:imdb:tt1")       # keeps the plugin's fetch date
+    assert c.post("/api/import/emby-plugin", content=b"{}").status_code == 400
