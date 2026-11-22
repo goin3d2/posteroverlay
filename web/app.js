@@ -129,6 +129,9 @@ function renderStyle() {
   ], ch));
   f.append(fieldset("Badges", s, [
     ["badge_style", "Style", "select", [["Column", "One column"], ["Separate", "Separate badges"]]],
+    ["badge_position", "Position", "select", [["TopLeft", "Top left"], ["TopRight", "Top right"], ["MiddleLeft", "Middle left"],
+      ["BottomLeft", "Bottom left"], ["BottomRight", "Bottom right"], ["Auto", "Automatic (keep clear of titles)"]], "",
+      "Automatic: top left unless the poster's title or other text is there, then the spot with the least text"],
     ["badge_height", "Badge size", "range", [3, 12, "%"]], ["badge_icon", "Icon size", "range", [50, 200, "%", 5]],
     ["badge_margin", "Margin", "range", [0, 10, "%"]], ["max_badges", "Most badges", "range", [1, 10]],
     ["badge_bg_color", "Background", "color"], ["badge_bg_opacity", "Background opacity", "range", [0, 100, "%"]],

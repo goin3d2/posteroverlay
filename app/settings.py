@@ -68,6 +68,15 @@ class BadgeStyle(str, Enum):
     column = "Column"
 
 
+class BadgePosition(str, Enum):
+    top_left = "TopLeft"
+    top_right = "TopRight"
+    middle_left = "MiddleLeft"
+    bottom_left = "BottomLeft"
+    bottom_right = "BottomRight"
+    auto = "Auto"   # per poster: the spot with the least text and detail behind it (top-left when it is clear)
+
+
 class TextFont(str, Enum):
     condensed = "Condensed"
     regular = "Regular"
@@ -121,6 +130,7 @@ class Style(BaseModel):
     show_ratings_on_seasons: bool = False
     badge_order: List[str] = Field(default_factory=lambda: list(BADGE_KEYS))
     badge_style: BadgeStyle = BadgeStyle.column
+    badge_position: BadgePosition = BadgePosition.top_left
     badge_height: int = 6
     badge_icon: int = 100
     badge_margin: int = 2

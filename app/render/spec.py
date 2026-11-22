@@ -53,6 +53,7 @@ class Spec:
     use_icons: bool = True
     column: bool = True
     wide_font: bool = True
+    badge_position: str = "TopLeft"
 
     @property
     def empty(self) -> bool:
@@ -86,6 +87,7 @@ def build(data: Optional[dict], kind: str, s: Style) -> Spec:
         use_icons=s.use_icons,
         column=s.badge_style.value == "Column",
         wide_font=s.text_font.value == "Regular",
+        badge_position=s.badge_position.value,
     )
     if not data:
         return spec

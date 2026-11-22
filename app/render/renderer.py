@@ -44,6 +44,64 @@ def render(poster: Image.Image, spec: Spec, icons: IconLookup) -> Image.Image:
         _banner(draw, (0, banner_top, w, banner_bottom), spec)
 
     if spec.badges:
+        badges = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        area_top = banner_bottom if has_banner and spec.banner_top else 0
+        area_bottom = banner_top if has_banner and not spec.banner_top else h
+        _draw_badges(badges, w, h, spec, icons, has_banner, banner_top, banner_bottom)
+        box = badges.getbbox()
+        if box:
+            pos = spec.badge_position
+            if pos == "Auto":
+                pos = choose_position(img, box, w, area_top, area_bottom)
+            dx, dy = _offset(pos, box, w, area_top, area_bottom)
+            if dx or dy:
+                moved = Image.new("RGBA", img.size, (0, 0, 0, 0))
+                moved.alpha_composite(badges.crop(box), (box[0] + dx, box[1] + dy))
+                badges = moved
+            layer.alpha_composite(badges)
+
+    return Image.alpha_composite(img, layer)
+
+
+POSITIONS = ["TopLeft", "TopRight", "MiddleLeft", "BottomLeft", "BottomRight"]
+
+
+def _offset(pos: str, box, w: int, area_top: float, area_bottom: float):
+    """Move badges drawn in the top-left corner to another spot, keeping the same gap to the edges."""
+    x0, y0, x1, y1 = box
+    gap_x, gap_y = x0, y0 - area_top
+    dx = (w - gap_x) - x1 if pos in ("TopRight", "BottomRight") else 0
+    if pos == "MiddleLeft":
+        dy = (area_top + area_bottom) / 2 - (y0 + y1) / 2
+    elif pos in ("BottomLeft", "BottomRight"):
+        dy = (area_bottom - gap_y) - y1
+    else:
+        dy = 0
+    return round(dx), round(dy)
+
+
+def choose_position(img: Image.Image, box, w: int, area_top: float, area_bottom: float) -> str:
+    """Top-left unless text (a title, a tagline) is behind it; then the spot with the least text."""
+    from .textdetect import text_mask, text_share
+    mask = text_mask(img)
+    if mask is None:
+        return "TopLeft"
+    scores = {}
+    for pos in POSITIONS:
+        dx, dy = _offset(pos, box, w, area_top, area_bottom)
+        scores[pos] = text_share(mask, (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy))
+    if scores["TopLeft"] < AUTO_CLEAR:
+        return "TopLeft"
+    return min(POSITIONS, key=lambda p: (round(scores[p], 2), POSITIONS.index(p)))
+
+
+AUTO_CLEAR = 0.015    # top-left is kept while text covers less than this share of the badges
+
+
+def _draw_badges(layer: Image.Image, w: int, h: int, spec: Spec, icons: IconLookup, has_banner: bool,
+                 banner_top: float, banner_bottom: float) -> None:
+    """Badges in the top-left corner (render() then moves them to the chosen spot)."""
+    if spec.badges:
         margin = w * spec.badge_margin
         unit = max(14.0, h * spec.badge_height)
         y = banner_bottom + margin if has_banner and spec.banner_top else margin
@@ -62,8 +120,6 @@ def render(poster: Image.Image, spec: Spec, icons: IconLookup) -> Image.Image:
                 used = _pill(layer, margin, y, unit, w * 0.6, badge, spec, icon)
                 y += used + gap
                 drawn += 1
-
-    return Image.alpha_composite(img, layer)
 
 
 def _banner(draw: ImageDraw.ImageDraw, rect, spec: Spec) -> None:

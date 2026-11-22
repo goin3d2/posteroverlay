@@ -1,0 +1,3 @@
+text-detect.onnx is the PaddleOCR PP-OCRv3 text detection model (ch_PP-OCRv3_det_infer), converted to ONNX
+as distributed by RapidOCR. PaddleOCR: https://github.com/PaddlePaddle/PaddleOCR (Apache License 2.0).
+RapidOCR: https://github.com/RapidAI/RapidOCR (Apache License 2.0).
