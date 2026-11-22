@@ -256,3 +256,29 @@ def test_server_collections_api_adopt_and_delete(ctx, emby, plex, web, monkeypat
     # The adopted collection syncs to its own server without changes.
     run_collections(ctx, Job("c"))
     assert emby.children[fav] == [e["dune"]] and list(boxsets(emby)) == ["Favourites"]
+
+
+def test_one_item_per_title(ctx, emby, plex, web):
+    e, _ = libraries(emby, plex)
+    vod = emby.add("Movie", "Dune", "1", {"Imdb": "tt1", "Tmdb": "101"}, emby_streams(), path="/vod/Movies/Dune.strm")
+    second = emby.add("Movie", "Dune", "1", {"Imdb": "tt1", "Tmdb": "101"}, emby_streams(), path="/m/Dune.1080p.mkv")
+    vod2 = emby.add("Movie", "Dune Part Two", "1", {"Imdb": "tt2"}, emby_streams(), path="/vod/Movies/Dune2.strm")
+    web.mdb_lists["lists/me/dune"] = [{"imdb_id": "tt1"}, {"imdb_id": "tt2"}]
+    col = CollectionDef(id="c1", name="Dune Saga", artwork=Artwork(mode="None"), sources=[Source(type="mdblist", value="me/dune")])
+    configure(ctx, servers(emby, plex)[:1], [col])
+    run_collections(ctx, Job("c"))
+    members = emby.children[boxsets(emby)["Dune Saga"]]
+    assert sorted(members) == sorted([e["dune"], e["dune2"]]), members       # real files, one each; no .strm copies
+    assert vod not in members and second not in members and vod2 not in members
+
+
+def test_keeps_the_copy_already_in_the_collection(ctx, emby, plex, web):
+    e, _ = libraries(emby, plex)
+    copy = emby.add("Movie", "Dune", "1", {"Imdb": "tt1", "Tmdb": "101"}, emby_streams(), path="/vod/Movies/Dune.strm")
+    existing = emby.add("BoxSet", "Dune Saga", "")
+    emby.children[existing] = [copy, e["dune2"]]
+    web.mdb_lists["lists/me/dune"] = [{"imdb_id": "tt1"}, {"imdb_id": "tt2"}]
+    col = CollectionDef(id="c1", name="Dune Saga", artwork=Artwork(mode="None"), sources=[Source(type="mdblist", value="me/dune")])
+    configure(ctx, servers(emby, plex)[:1], [col])
+    run_collections(ctx, Job("c"))
+    assert sorted(emby.children[existing]) == sorted([copy, e["dune2"]])

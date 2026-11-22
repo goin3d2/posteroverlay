@@ -61,8 +61,18 @@ def match(refs: List[Ref], index: LibraryIndex) -> MatchResult:
             res.unmatched.append(r)
             continue
         res.matched += 1
-        for f in found:
-            if f not in seen:
-                seen.add(f)
-                res.ids.append(f)
+        # One item per title, as the Emby Collections plugin did: a library often has the same title more than once
+        # (own files and VOD copies, versions). A real file beats a .strm copy; ties keep the same item every run.
+        best = min(found, key=lambda i: (_is_strm(index.by_id.get(i)), _num(i)))
+        if best not in seen:
+            seen.add(best)
+            res.ids.append(best)
     return res
+
+
+def _is_strm(item) -> bool:
+    return bool(item and (item.path or "").lower().endswith(".strm"))
+
+
+def _num(i: str):
+    return (0, int(i), "") if i.isdigit() else (1, 0, i)

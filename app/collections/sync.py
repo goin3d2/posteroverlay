@@ -163,6 +163,7 @@ class CollectionRun:
                 return
 
         members = set(srv.collection_members(rid))
+        desired = self._keep_current_copies(sid, desired, members)
         add = sorted(desired - members)
         remove = sorted(members - desired) if allow_remove else []
         if self.dry_run:
@@ -174,6 +175,28 @@ class CollectionRun:
             srv.remove_from_collection(rid, remove)
         log(f"{c.name} on {where}: added {len(add)}, removed {len(remove)}, now {len(members) + len(add) - len(remove)}")
         self._finish(c, sid, section, rid, log, image_cache, desired)
+
+    def _keep_current_copies(self, sid: str, desired: Set[str], members: Set[str]) -> Set[str]:
+        """When a title is in the library more than once and the collection already holds another copy of it,
+        keep that copy instead of swapping it for the one matching picked."""
+        idx = self.index(sid)
+
+        def key(iid: str):
+            it = idx.by_id.get(iid)
+            if it is None:
+                return None
+            for prov in ("imdb", "tmdb", "tvdb"):
+                if it.ids.get(prov):
+                    return (it.kind, prov, it.ids[prov].lower())
+            return None
+        by_key = {key(i): i for i in desired if key(i)}
+        out = set(desired)
+        for m in members - desired:
+            k = key(m)
+            if k in by_key and by_key[k] in out:
+                out.discard(by_key[k])
+                out.add(m)
+        return out
 
     def _apply_home(self, c: CollectionDef, sid: str, section: str, rid: str, log) -> None:
         apply_home(self.ctx, self.servers[sid], c, sid, section, rid, log)

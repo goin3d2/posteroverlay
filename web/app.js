@@ -280,15 +280,15 @@ const SRC_HINT = { mdblist: "List URL, user/list-name, or external/<id> for an I
 let collections = [];
 async function loadServerCollections() {
   const box = $("#server-cols");
-  const servers = settings.servers.filter((s) => s.enabled && s.url);
-  if (!servers.length) { box.innerHTML = '<p class="hint">No servers enabled.</p>'; return; }
+  const servers = settings.servers.filter((s) => s.url);
+  if (!servers.length) { box.innerHTML = '<p class="hint">No servers set up yet.</p>'; return; }
   box.innerHTML = '<p class="hint">Loading…</p>';
   const parts = await Promise.all(servers.map(async (s) => {
     try { return [s, await api("GET", `/api/servers/${s.id}/collections`)]; } catch (e) { return [s, e]; }
   }));
   box.innerHTML = "";
   for (const [s, list] of parts) {
-    const h = document.createElement("h3"); h.textContent = s.name || s.kind; box.append(h);
+    const h = document.createElement("h3"); h.textContent = (s.name || s.kind) + (s.enabled ? "" : " (disabled: nothing is synced here)"); box.append(h);
     if (list instanceof Error) { box.insertAdjacentHTML("beforeend", `<p class="hint">Could not read collections: ${esc(list.message)}</p>`); continue; }
     if (!list.length) { box.insertAdjacentHTML("beforeend", '<p class="hint">No collections.</p>'); continue; }
     const t = document.createElement("table"); t.className = "list";
