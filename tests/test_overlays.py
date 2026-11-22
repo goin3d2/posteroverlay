@@ -149,3 +149,53 @@ def test_only_selected_items(ctx, emby, web):
 
 
 from tests.fakes import FakeEmby, FakePlex  # noqa: E402
+
+
+def test_plex_draws_on_emby_originals(ctx, emby, plex, web):
+    from PIL import Image
+    import io
+    clean = poster_bytes((10, 200, 10), size=(2000, 3000))
+    em = emby.add("Movie", "Big Movie", "1", {"Imdb": "tt1"}, emby_streams(), path="/m/Big.mkv")
+    emby.set_image(em, clean)
+    web.tmdb_tv["33"] = {"status": "Ended"}
+    eshow = emby.add("Series", "A Show", "2", {"Tvdb": "77", "Tmdb": "33"}, path="/tv/A Show")
+    es1 = emby.add("Season", "Season 1", "2", {}, IndexNumber=1, SeriesId=eshow, ParentId=eshow)
+    emby.set_image(es1, poster_bytes((0, 0, 220)))
+    # Plex's own poster already has someone else's badges on it.
+    pm = plex.add("movie", "Big Movie", "1", ["imdb://tt1"], plex_media())
+    plex.set_image(pm, poster_bytes((255, 0, 255)))
+    pshow = plex.add("show", "A Show", "2", ["tvdb://77", "tmdb://33"])
+    ps1 = plex.add("season", "Season 1", "2", [], parentRatingKey=pshow, index=1)
+    lone = plex.add("movie", "Only On Plex", "1", ["imdb://tt8"], plex_media())
+    lone_art = plex.images[plex.meta[lone]["thumb"]]
+    e = ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN)
+    p = ServerConfig(id="p1", kind="plex", name="Plex", url=plex.url, token=FakePlex.TOKEN, originals_from="e1")
+    setup(ctx, e, p)
+    res = run_overlays(ctx, "p1", Job("t"))
+    assert "drawn on Emby's original" in res, res
+    row = ctx.store.poster("p1", pm)
+    # Plex shares Emby's original file (shrunk to 1000 px) instead of keeping its own copy.
+    assert row["original_file"] == ctx.store.poster("e1", em)["original_file"]
+    assert Image.open(row["original_file"]).width == 1000
+    drawn = Image.open(io.BytesIO(plex.images[plex.meta[pm]["thumb"]])).convert("RGB")
+    assert drawn.width == 1000 and drawn.getpixel((500, 1400))[1] > 150      # green Emby art, not the magenta one
+    sdrawn = Image.open(io.BytesIO(plex.images[plex.meta[ps1]["thumb"]])).convert("RGB")
+    assert sdrawn.getpixel((300, 500))[2] > 150                                  # season matched through its show
+    assert ctx.store.poster("p1", lone)["original_file"].endswith(f"p1/{lone}.img")
+    # Emby's own run later reuses the same original and does not treat it as changed.
+    run_overlays(ctx, "e1", Job("t"))
+    assert open(ctx.store.poster("e1", em)["original_file"], "rb").read()[:2] == b"\xff\xd8"
+    assert is_ours(emby.images[em])
+    # Restoring Plex puts Emby's clean art there (the old badged Plex poster is not wanted back).
+    restore_all(ctx, "p1", Job("t"))
+    assert Image.open(io.BytesIO(plex.images[plex.meta[pm]["thumb"]])).convert("RGB").getpixel((500, 1400))[1] > 150
+    assert plex.images[plex.meta[lone]["thumb"]] == lone_art
+
+
+def test_skip_paths(ctx, emby, web):
+    m1, m1b, m2, *_ = emby_library(emby)
+    vod = emby.add("Movie", "Vod Movie", "1", {"Imdb": "tt7"}, emby_streams(), path="/vod/Movies/x.strm")
+    srv = ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN, skip_paths=["/vod"])
+    setup(ctx, srv)
+    run_overlays(ctx, "e1", Job("t"))
+    assert not is_ours(emby.images[vod]) and is_ours(emby.images[m2])

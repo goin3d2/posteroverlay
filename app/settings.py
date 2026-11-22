@@ -42,6 +42,15 @@ class ServerConfig(BaseModel):
     # Emby only: path prefix as Emby sees xtreamfs .strm files, when it differs from categories.json.
     path_map_from: str = ""
     path_map_to: str = ""
+    # Draw on another server's original poster when the same title is there (e.g. Plex uses Emby's originals).
+    originals_from: str = ""
+    # Titles whose file path starts with one of these are left alone (e.g. /vod).
+    skip_paths: List[str] = Field(default_factory=list)
+
+    @field_validator("skip_paths")
+    @classmethod
+    def _paths(cls, v: List[str]) -> List[str]:
+        return [p.strip() for p in v or [] if p and p.strip()]
 
     @field_validator("url")
     @classmethod
@@ -210,6 +219,8 @@ class Settings(BaseModel):
         "e1327dc4e7f709277e3e2be88df76c3eefe349e2/defaults/overlays/images"
     )
     xtream_categories_path: str = "/xtreamfs/categories.json"
+    # Originals are kept at most this wide (pixels); posters are drawn and uploaded at that size.
+    original_max_width: int = 1000
     style: Style = Field(default_factory=Style)
     collections: List[CollectionDef] = Field(default_factory=list)
 

@@ -198,12 +198,13 @@ function renderGeneral() {
   f.append(fieldset("Files", settings, [
     ["xtream_categories_path", "xtreamfs categories.json", "text", "/xtreamfs/categories.json"],
     ["icon_source", "Badge icon source", "url"],
+    ["original_max_width", "Keep originals up to (pixels wide)", "number", null, "Posters are drawn and uploaded at this size. 1000 looks sharp on a TV and keeps the config folder small."],
   ]));
 }
 
 // ---------------------------------------------------------------------------------- servers
 function addServer(kind) {
-  settings.servers.push({ id: Math.random().toString(36).slice(2, 10), kind, name: kind === "emby" ? "Emby" : "Plex", url: "", token: "", enabled: true, libraries: [], path_map_from: "", path_map_to: "" });
+  settings.servers.push({ id: Math.random().toString(36).slice(2, 10), kind, name: kind === "emby" ? "Emby" : "Plex", url: "", token: "", enabled: true, libraries: [], path_map_from: "", path_map_to: "", originals_from: "", skip_paths: [] });
   renderServers();
 }
 function renderServers() {
@@ -222,6 +223,13 @@ function renderServers() {
       el.append(fieldRow(s, ["path_map_from", "xtreamfs path in categories.json", "text", "/vod", "Only if Emby sees the .strm files under another path"]));
       el.append(fieldRow(s, ["path_map_to", "Same folder as Emby sees it", "text", "/mnt/xtreamfs"]));
     }
+    const others = settings.servers.filter((o) => o.id !== s.id);
+    if (others.length) el.append(fieldRow(s, ["originals_from", "Draw on original posters from", "select",
+      [["", "This server's own posters"], ...others.map((o) => [o.id, `${o.name || o.kind} when the title is there too`])],
+      "Keeps both servers' artwork identical, and stores no second copy of each original"]));
+    const skip = { v: (s.skip_paths || []).join(", ") };
+    el.append(fieldRow(skip, ["v", "Skip titles in folders", "text", "/vod, /mnt/media/Other", "Comma separated. Titles whose file is under these folders get no overlay"], () => {
+      s.skip_paths = skip.v.split(",").map((x) => x.trim()).filter(Boolean); }));
     const libs = document.createElement("div"); libs.className = "field";
     libs.innerHTML = `<label>Libraries</label><div class="ctl libs">${s.libraries.length ? s.libraries.map((l) => `<span class="pill">${esc(l)}</span>`).join("") : '<span class="hint">All movie and TV libraries. Test to choose.</span>'}</div>`;
     el.append(libs);

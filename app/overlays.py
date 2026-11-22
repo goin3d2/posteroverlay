@@ -49,6 +49,13 @@ class OverlayRun:
         self.server: MediaServer = make_server(cfg)
         self.store = ctx.store
         self.counts = defaultdict(int)
+        self.max_width = max(400, int(self.settings.original_max_width or 1000))
+        self.by_id: Dict[str, Item] = {}
+        # Another server whose originals we draw on (same title matched by ids).
+        src = self.settings.server(cfg.originals_from) if cfg.originals_from and cfg.originals_from != cfg.id else None
+        self.source_cfg = src if src and src.enabled and src.url and src.token else None
+        self.source: Optional[MediaServer] = make_server(self.source_cfg) if self.source_cfg else None
+        self._source_index: Optional[Dict[tuple, Item]] = None
 
     # ------------------------------------------------------------------ data
     def gather(self) -> Tuple[List[Item], List[Item], Dict[str, dict]]:
@@ -59,6 +66,15 @@ class OverlayRun:
         movies = [i for i in items if i.kind == "movie"]
         shows = [i for i in items if i.kind == "show"]
         seasons = self.server.all_seasons() if (s.seasons or s.series) else []
+        if self.cfg.skip_paths:
+            skip = tuple(self.cfg.skip_paths)
+            before = len(movies) + len(shows)
+            movies = [m for m in movies if not (m.path or "").startswith(skip)]
+            shows = [sh for sh in shows if not (sh.path or "").startswith(skip)]
+            kept = {sh.id for sh in shows}
+            seasons = [se for se in seasons if se.parent in kept]
+            self.log(f"{self.server.name}: {before - len(movies) - len(shows)} titles skipped by folder")
+        self.by_id = {i.id: i for i in movies + shows + seasons}
         if self.only:
             keep = set(self.only) | {se.parent for se in seasons if se.id in self.only}
             vkeys = {m.version_key for m in movies if m.id in keep and m.version_key}
@@ -357,10 +373,68 @@ class OverlayRun:
         verb = "would update" if self.dry_run else "updated"
         summary = (f"{self.server.name}: {verb} {c['updated']} posters, {c['unchanged']} unchanged, "
                    f"{c['restored']} restored to the original, {c['skipped']} skipped, {c['failed']} failed")
+        if self.source_cfg:
+            summary += f"; {c['from_source']} drawn on {self.source_cfg.name}'s original"
         if self.dry_run:
             summary += ". Preview only: nothing was sent to the server (turn on \"Apply changes to servers\")."
         self.log(summary)
         return summary
+
+    def _match_source(self, it: Item) -> Optional[Item]:
+        """The same title (or season) on the source server, matched by IMDb/TMDB/TVDB id."""
+        if self._source_index is None:
+            self.log(f"Reading {self.source_cfg.name} titles to use its original posters")
+            idx: Dict[tuple, Item] = {}
+            items = self.source.items()
+            for x in items:
+                for prov in ("imdb", "tmdb", "tvdb"):
+                    if x.ids.get(prov):
+                        idx.setdefault((x.kind, prov, x.ids[prov]), x)
+            try:
+                for se in self.source.all_seasons():
+                    if se.index is not None:
+                        idx.setdefault(("season", se.parent, se.index), se)
+            except ServerError as e:
+                self.log(f"{self.source_cfg.name} seasons not read: {e}", "warn")
+            self._source_index = idx
+        idx = self._source_index
+        if it.kind == "season":
+            show = self.by_id.get(it.parent)
+            src_show = self._match_source(show) if show else None
+            return idx.get(("season", src_show.id, it.index)) if src_show and it.index is not None else None
+        for prov in ("imdb", "tmdb", "tvdb"):
+            if it.ids.get(prov) and (it.kind, prov, it.ids[prov]) in idx:
+                return idx[(it.kind, prov, it.ids[prov])]
+        return None
+
+    def _from_source(self, it: Item) -> Optional[Tuple[bytes, str]]:
+        """Original poster of the matching title on the source server, shared with that server's own originals."""
+        try:
+            m = self._match_source(it)
+        except ServerError as e:
+            self.log(f"{self.source_cfg.name}: {e}", "warn")
+            self.source = None
+            return None
+        if m is None:
+            return None
+        sid = self.source_cfg.id
+        srow = self.store.poster(sid, m.id) or {}
+        spath = srow.get("original_file") or ""
+        if spath and os.path.exists(spath):
+            with open(spath, "rb") as f:
+                return f.read(), spath
+        try:
+            data = self.source.get_poster(m.id)
+        except ServerError:
+            return None
+        if renderer.is_ours(data):
+            return None
+        data = _shrink(data, self.max_width)
+        spath = self.ctx.path("originals", sid, f"{m.id}.img")
+        with open(spath, "wb") as f:
+            f.write(data)
+        self.store.save_poster(sid, m.id, title=m.title, original_file=spath, original_marker=m.marker)
+        return data, spath
 
     def _original_path(self, item_id: str) -> str:
         return self.ctx.path("originals", self.cfg.id, f"{item_id}.img")
@@ -388,7 +462,18 @@ class OverlayRun:
 
         original = None
         orig_path = row.get("original_file") or ""
-        if orig_path and os.path.exists(orig_path) and (ours_now or it.marker == row.get("original_marker")):
+        if self.source is not None:
+            got = self._from_source(it)
+            if got:
+                original, src_path = got
+                if src_path != orig_path:
+                    orig_path = src_path
+                    self.store.save_poster(self.cfg.id, it.id, title=it.title, original_file=src_path,
+                                           original_marker=it.marker)
+                self.counts["from_source"] += 1
+        if original is not None:
+            pass
+        elif orig_path and os.path.exists(orig_path) and (ours_now or it.marker == row.get("original_marker")):
             with open(orig_path, "rb") as f:
                 original = f.read()
         else:
@@ -406,14 +491,16 @@ class OverlayRun:
                     self.counts["skipped"] += 1
                     return
             else:
-                original = current
+                original = _shrink(current, self.max_width)
                 orig_path = self._original_path(it.id)
                 with open(orig_path, "wb") as f:
-                    f.write(current)
+                    f.write(original)
                 self.store.save_poster(self.cfg.id, it.id, title=it.title, original_file=orig_path,
                                        original_marker=it.marker)
 
         poster = renderer.open_image(original)
+        if poster.width > self.max_width:
+            poster = poster.resize((self.max_width, round(poster.height * self.max_width / poster.width)))
         out = renderer.render(poster, spec, self.ctx.icons.get)
         jpeg = renderer.to_jpeg(out, key)
         if self.dry_run:
@@ -423,6 +510,22 @@ class OverlayRun:
             marker = self.server.upload_poster(it.id, jpeg)
             self.store.save_poster(self.cfg.id, it.id, title=it.title, applied_key=key, applied_marker=marker)
         self.counts["updated"] += 1
+
+
+def _shrink(data: bytes, max_width: int) -> bytes:
+    """Keep originals no wider than max_width (posters are never shown bigger); small ones are kept as they are."""
+    import io
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(data))
+        if im.width <= max_width:
+            return data
+        im = im.convert("RGB").resize((max_width, round(im.height * max_width / im.width)), Image.LANCZOS)
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=90)
+        return out.getvalue()
+    except Exception:  # noqa: BLE001
+        return data
 
 
 def _ctype(path: str) -> str:
