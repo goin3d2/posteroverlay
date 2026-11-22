@@ -298,7 +298,13 @@ class OverlayRun:
                 if self.job.cancel.is_set():
                     return
                 try:
-                    episodes_by_show[sh.id] = self.server.episodes_of(sh)
+                    # Keep only the episodes that decide a badge (newest EPISODE_SAMPLE per season): holding every
+                    # episode of a large library at once takes gigabytes.
+                    per: Dict[int, List[Item]] = defaultdict(list)
+                    for e in self.server.episodes_of(sh):
+                        per[e.season if e.season is not None else -1].append(e)
+                    episodes_by_show[sh.id] = [e for lst in per.values()
+                                               for e in sorted(lst, key=lambda e: e.index or 0, reverse=True)[:EPISODE_SAMPLE]]
                 except ServerError as e:
                     self.log(f"{sh.title}: episodes not listed: {e}", "warn")
                 self.job.done += 1

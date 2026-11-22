@@ -79,6 +79,7 @@ async function refreshStatus() {
   const cards = [
     ...status.servers.map((s) => card(s.name, `${s.posters.applied || 0}`, `posters with overlays · ${s.kind}${s.enabled ? "" : " · off"}`)),
     card("Collections", status.collections, "defined here"),
+    ...(status.memory_mb ? [card("Memory", `${status.memory_mb.toLocaleString()} MB`, "used by the container")] : []),
     card("Badge icons", `${status.icons.have}/${status.icons.total}`, status.icons.have < status.icons.total ? "some missing; they download on the first run" : "ready"),
     card("IMDb ratings", status.imdb_titles.toLocaleString(), "titles from the IMDb dataset"),
     card("MDBList", q ? `${Math.max(0, q.limit - q.used)}` : "—", q ? `requests left today of ${q.limit}` + (status.mdblist_waiting ? ` · ${status.mdblist_waiting.toLocaleString()} titles waiting for scores` : "") : "not used yet"),

@@ -241,8 +241,15 @@ def status():
     s = ctx.settings.get()
     counts = ctx.store.poster_counts()
     have, total = ctx.icons.count()
+    memory_mb = None
+    try:
+        with open("/proc/self/status") as f:
+            memory_mb = next(int(line.split()[1]) // 1024 for line in f if line.startswith("VmRSS:"))
+    except (OSError, StopIteration, ValueError):
+        pass
     return {
         "version": __version__,
+        "memory_mb": memory_mb,
         "apply_changes": s.apply_changes,
         "jobs": {k: j.as_dict() for k, j in ctx.jobs.items()},
         "servers": [{"id": x.id, "name": x.name or x.kind, "kind": x.kind.value, "enabled": x.enabled,
