@@ -1,7 +1,7 @@
 """Plex Media Server client (X-Plex-Token, JSON responses)."""
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 from urllib.parse import quote
 
 from .base import Item, Library, MediaServer, RemoteCollection, ServerError, Stream
@@ -249,6 +249,32 @@ class PlexServer(MediaServer):
     def remove_from_collection(self, collection_id: str, item_ids: List[str]) -> None:
         for iid in item_ids:
             self._request("DELETE", f"/library/collections/{collection_id}/items/{iid}", expect_json=False)
+
+    def _hub(self, collection_id: str, section: str) -> Optional[dict]:
+        r = self._get(f"/hubs/sections/{section}/manage", metadataItemId=collection_id)
+        return next((h for h in r.get("Hub") or [] if str(h.get("identifier", "")).endswith(f".{collection_id}")), None)
+
+    def home_status(self, collection_id: str, section: str = "") -> str:
+        h = self._hub(collection_id, section) if section else None
+        if not h:
+            return ""
+        where = [n for k, n in (("promotedToRecommended", "Recommended"), ("promotedToOwnHome", "your Home"),
+                                ("promotedToSharedHome", "Friends' Home")) if h.get(k) in (True, 1, "1")]
+        return ", ".join(where)
+
+    def set_home(self, collection_id: str, section: str, home, title: str) -> None:
+        h = self._hub(collection_id, section)
+        flags = {"promotedToRecommended": int(home.plex_recommended), "promotedToOwnHome": int(home.plex_home),
+                 "promotedToSharedHome": int(home.plex_shared)}
+        if home.enabled and any(flags.values()):
+            if h:
+                self._request("PUT", f"/hubs/sections/{section}/manage/{h['identifier']}", params=flags,
+                              expect_json=False)
+            else:
+                self._request("POST", f"/hubs/sections/{section}/manage",
+                              params={**flags, "metadataItemId": collection_id}, expect_json=False)
+        elif h:
+            self._request("DELETE", f"/hubs/sections/{section}/manage/{h['identifier']}", expect_json=False)
 
     def delete_collection(self, collection_id: str) -> None:
         self._request("DELETE", f"/library/metadata/{collection_id}", expect_json=False)

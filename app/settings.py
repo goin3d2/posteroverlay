@@ -203,6 +203,18 @@ class CollectionSort(str, Enum):
     name = "Name"
 
 
+class HomeSettings(BaseModel):
+    """Where a collection shows up on the servers' home screens."""
+    enabled: bool = False
+    name: str = ""                      # row name (Emby); empty: the collection's name
+    emby_sort: str = "ProductionYear|Descending"
+    emby_view: str = ""                 # "" cards, "spotlight" large banners
+    emby_users: List[str] = Field(default_factory=list)   # Emby user ids; empty: every user
+    plex_recommended: bool = True       # the library's Recommended tab
+    plex_home: bool = True              # your Home page
+    plex_shared: bool = False           # Friends' Home pages
+
+
 class CollectionDef(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
     name: str
@@ -216,6 +228,7 @@ class CollectionDef(BaseModel):
     only_add: bool = False
     sort: CollectionSort = CollectionSort.default
     artwork: Artwork = Field(default_factory=Artwork)
+    home: HomeSettings = Field(default_factory=HomeSettings)
 
 
 class Settings(BaseModel):

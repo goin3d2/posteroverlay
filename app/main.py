@@ -111,10 +111,74 @@ def _server(sid: str):
     return make_server(cfg)
 
 
+def _owners(sid: str) -> dict:
+    """remote collection id -> the collection defined here that manages it."""
+    out = {}
+    for c in ctx.settings.get().collections:
+        for m in ctx.store.collection_maps(c.id):
+            if m["server"] == sid:
+                out[m["remote_id"]] = {"id": c.id, "name": c.name}
+    return out
+
+
 @app.get("/api/servers/{sid}/collections")
 def server_collections(sid: str):
+    srv = _server(sid)
     try:
-        return [{"id": c.id, "name": c.name, "section": c.section, "count": c.count} for c in _server(sid).collections()]
+        libs = {lib.id: lib.name for lib in srv.libraries()}
+        owners = _owners(sid)
+        return [{"id": c.id, "name": c.name, "section": c.section, "library": libs.get(c.section, ""), "count": c.count,
+                 "managed_by": owners.get(c.id)} for c in sorted(srv.collections(), key=lambda c: c.name.lower())]
+    except ServerError as e:
+        raise HTTPException(502, str(e))
+
+
+@app.get("/api/servers/{sid}/collections/{rid}/home")
+def server_collection_home(sid: str, rid: str, section: str = ""):
+    try:
+        return {"home": _server(sid).home_status(rid, section)}
+    except ServerError as e:
+        return {"home": "", "error": str(e)}
+
+
+@app.delete("/api/servers/{sid}/collections/{rid}")
+def delete_server_collection(sid: str, rid: str):
+    """Delete a collection on a server (an explicit action: it does not wait for "Apply changes")."""
+    srv = _server(sid)
+    name = next((c.name for c in srv.collections() if c.id == rid), rid)
+    srv.delete_collection(rid)
+    for c in ctx.settings.get().collections:
+        for m in ctx.store.collection_maps(c.id):
+            if m["server"] == sid and m["remote_id"] == rid:
+                ctx.store.delete_collection_map(c.id, sid, m["section"])
+    ctx.logger("collections")(f"Deleted collection '{name}' on {srv.name}")
+    return {"ok": True}
+
+
+@app.post("/api/servers/{sid}/collections/{rid}/adopt")
+def adopt_server_collection(sid: str, rid: str):
+    """Manage an existing collection from here: a definition whose titles come from that collection."""
+    srv = _server(sid)
+    rc = next((c for c in srv.collections() if c.id == rid), None)
+    if rc is None:
+        raise HTTPException(404, "Collection not found")
+    owner = _owners(sid).get(rid)
+    if owner:
+        raise HTTPException(400, f"Already managed here as '{owner['name']}'")
+    c = CollectionDef(name=rc.name, servers=[sid], artwork={"mode": "None"},
+                      sources=[{"type": "server_collection", "value": f"{sid}:{rc.name}", "label": f"{srv.name}: {rc.name}"}])
+    s = ctx.settings.get()
+    s.collections.append(c)
+    ctx.settings.save(s)
+    ctx.store.set_collection_map(c.id, sid, rc.section, rid)
+    ctx.logger("collections")(f"'{rc.name}' on {srv.name} is now managed here")
+    return c.model_dump(mode="json")
+
+
+@app.get("/api/servers/{sid}/users")
+def server_users(sid: str):
+    try:
+        return _server(sid).users()
     except ServerError as e:
         raise HTTPException(502, str(e))
 

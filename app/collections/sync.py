@@ -175,6 +175,9 @@ class CollectionRun:
         log(f"{c.name} on {where}: added {len(add)}, removed {len(remove)}, now {len(members) + len(add) - len(remove)}")
         self._finish(c, sid, section, rid, log, image_cache, desired)
 
+    def _apply_home(self, c: CollectionDef, sid: str, section: str, rid: str, log) -> None:
+        apply_home(self.ctx, self.servers[sid], c, sid, section, rid, log)
+
     def _finish(self, c: CollectionDef, sid: str, section: str, rid: str, log, image_cache: Dict[str, tuple],
                 desired: Set[str]) -> None:
         srv = self.servers[sid]
@@ -182,6 +185,7 @@ class CollectionRun:
             srv.update_collection(rid, c.name, c.sort_name, c.summary, c.sort.value, section)
         except ServerError as e:
             log(f"{c.name}: details not updated on {srv.name}: {e}", "warn")
+        self._apply_home(c, sid, section, rid, log)
         if "img" not in image_cache:
             def member_posters() -> List[bytes]:
                 out = []
@@ -205,6 +209,29 @@ class CollectionRun:
         srv.upload_poster(rid, data, "image/png" if data[:4] == b"\x89PNG" else "image/jpeg")
         self.ctx.store.set_collection_map(c.id, sid, section, rid, key)
         log(f"{c.name}: poster from {source} set on {srv.name}")
+
+
+def home_key(c: CollectionDef, rid: str) -> str:
+    import hashlib
+    import json
+    return hashlib.sha1(json.dumps([rid, c.name, c.home.model_dump()], sort_keys=True).encode()).hexdigest()[:12]
+
+
+def apply_home(ctx: Context, srv: MediaServer, c: CollectionDef, sid: str, section: str, rid: str, log,
+               force: bool = False) -> None:
+    """Show or hide the collection on home screens; skipped when nothing changed since the last time."""
+    kv = f"home:{c.id}:{sid}:{section}"
+    stored = ctx.store.get(kv)
+    key = home_key(c, rid)
+    if not force and (stored == key or (stored is None and not c.home.enabled)):
+        return
+    try:
+        srv.set_home(rid, section, c.home, c.name)
+        ctx.store.put(kv, key)
+        where = f"{srv.name}" + (f" (library {section})" if section else "")
+        log(f"{c.name}: home screen {'set' if c.home.enabled else 'row removed'} on {where}")
+    except ServerError as e:
+        log(f"{c.name}: home screen not set on {srv.name}: {e}", "warn")
 
 
 def run_collections(ctx: Context, job: Job, dry_run: bool = False, only: Optional[str] = None) -> str:

@@ -82,6 +82,7 @@ class FakeEmby(_Server):
         self.libs = [{"ItemId": "1", "Name": "Movies", "CollectionType": "movies"},
                      {"ItemId": "2", "Name": "TV shows", "CollectionType": "tvshows"}]
         self.plugins = []
+        self.home = {"u1": [{"Id": "s1", "SectionType": "resume"}], "u2": []}   # user -> home sections
         self.next_id = 1000
         super().__init__()
 
@@ -127,7 +128,22 @@ class FakeEmby(_Server):
         if p == "/Plugins":
             return 200, "", self.plugins
         if p == "/Users":
-            return 200, "", [{"Id": "u1", "Policy": {"IsAdministrator": True}}]
+            return 200, "", [{"Id": "u1", "Name": "admin", "Policy": {"IsAdministrator": True}},
+                             {"Id": "u2", "Name": "kid", "Policy": {"IsAdministrator": False}}]
+        if p.startswith("/Users/") and "/HomeSections" in p:
+            uid = p.split("/")[2]
+            secs = self.home.setdefault(uid, [])
+            if p.endswith("/Delete"):
+                ids = json.loads(body)["Ids"]
+                self.home[uid] = [s for s in secs if s["Id"] not in ids]
+                return 204, "text/plain", b""
+            if method == "POST":
+                sec = json.loads(body)
+                if not sec.get("Id"):
+                    sec["Id"] = f"h{self.nid()}"
+                self.home[uid] = [s for s in secs if s["Id"] != sec["Id"]] + [sec]
+                return 204, "text/plain", b""
+            return 200, "", {"Items": secs}
         if p == "/Items" and method == "GET":
             return 200, "", self.query(q)
         if p.startswith("/Users/u1/Items/"):
@@ -200,6 +216,7 @@ class FakePlex(_Server):
         self.images = {}      # thumb path -> bytes
         self.children = {}    # collection rk -> [rk]
         self.sections = [{"key": "1", "type": "movie", "title": "Movies"}, {"key": "2", "type": "show", "title": "TV Shows"}]
+        self.hubs = {}        # section -> [hub]
         self.next = 100
         super().__init__()
 
@@ -281,6 +298,26 @@ class FakePlex(_Server):
             if len(parts) == 6 and parts[4] == "items" and method == "DELETE":
                 self.children[ck] = [r for r in self.children.get(ck, []) if r != parts[5]]
                 return 200, "text/plain", b""
+        if path.startswith("/hubs/sections/") and "/manage" in path:
+            parts = path.split("/")
+            sec = parts[3]
+            hubs = self.hubs.setdefault(sec, [])
+            flags = {k: q[k] for k in ("promotedToRecommended", "promotedToOwnHome", "promotedToSharedHome") if k in q}
+            if len(parts) == 5:
+                if method == "POST":
+                    hubs.append({"identifier": f"custom.collection.{sec}.{q['metadataItemId']}", **flags})
+                    return 200, "text/plain", b""
+                want = q.get("metadataItemId")
+                found = [h for h in hubs if not want or h["identifier"].endswith("." + want)]
+                return 200, "", {"MediaContainer": {"Hub": found}}
+            ident = parts[5]
+            if method == "DELETE":
+                self.hubs[sec] = [h for h in hubs if h["identifier"] != ident]
+            elif method == "PUT":
+                for h in hubs:
+                    if h["identifier"] == ident:
+                        h.update(flags)
+            return 200, "text/plain", b""
         if path.startswith("/library/metadata/"):
             parts = path.split("/")
             rk = parts[3]

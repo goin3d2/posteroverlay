@@ -71,6 +71,12 @@
   <p class="hint">Each collection is defined once here and kept the same on every server it targets.
     On Plex one collection is made in each library that has matching titles.</p>
   <table class="list" id="col-table"></table>
+  <div class="row between" style="margin-top:28px"><h2>Collections on your servers</h2>
+    <button onclick="loadServerCollections()">Refresh</button></div>
+  <p class="hint">Every collection that exists on Emby and Plex, including ones not made here. <b>Manage here</b> keeps it
+    in sync from this page (its titles stay as they are) and lets you set its home screen rows; <b>Delete</b> removes it
+    from that server right away.</p>
+  <div id="server-cols"></div>
 </section>
 
 <!-- SERVERS -->

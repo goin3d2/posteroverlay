@@ -27,7 +27,7 @@ function showTab(name) {
   $$(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
   location.hash = name;
   if (name === "activity") loadActivity();
-  if (name === "collections") loadCollections();
+  if (name === "collections") { loadCollections(); loadServerCollections(); }
   if (name === "posters") { renderStyle(); schedulePreview(); fillServerSelect($("#pv-server")); }
   if (name === "servers") renderServers();
   if (name === "settings") renderGeneral();
@@ -278,6 +278,44 @@ const SRC_TYPES = [["mdblist", "MDBList / IMDb list"], ["tmdb_collection", "TMDB
 const SRC_HINT = { mdblist: "List URL, user/list-name, or external/<id> for an IMDb list added in MDBList", tmdb_collection: "TMDB collection id, e.g. 10194",
   xtream: "movie:<id> or series:<id>", server_collection: "<server id>:<collection name>", label: "Emby tag / Plex label" };
 let collections = [];
+async function loadServerCollections() {
+  const box = $("#server-cols");
+  const servers = settings.servers.filter((s) => s.enabled && s.url);
+  if (!servers.length) { box.innerHTML = '<p class="hint">No servers enabled.</p>'; return; }
+  box.innerHTML = '<p class="hint">Loading…</p>';
+  const parts = await Promise.all(servers.map(async (s) => {
+    try { return [s, await api("GET", `/api/servers/${s.id}/collections`)]; } catch (e) { return [s, e]; }
+  }));
+  box.innerHTML = "";
+  for (const [s, list] of parts) {
+    const h = document.createElement("h3"); h.textContent = s.name || s.kind; box.append(h);
+    if (list instanceof Error) { box.insertAdjacentHTML("beforeend", `<p class="hint">Could not read collections: ${esc(list.message)}</p>`); continue; }
+    if (!list.length) { box.insertAdjacentHTML("beforeend", '<p class="hint">No collections.</p>'); continue; }
+    const t = document.createElement("table"); t.className = "list";
+    t.innerHTML = `<tr><th>Name</th>${s.kind === "plex" ? "<th>Library</th>" : ""}<th>Titles</th><th>Home screen</th><th>Managed here</th><th></th></tr>` +
+      list.map((c, i) => `<tr><td><b>${esc(c.name)}</b></td>${s.kind === "plex" ? `<td>${esc(c.library)}</td>` : ""}<td>${c.count}</td>
+        <td class="hint" data-home="${i}">…</td>
+        <td>${c.managed_by ? `<span class="pill">${esc(c.managed_by.name)}</span>` : '<span class="hint">no</span>'}</td>
+        <td style="white-space:nowrap">${c.managed_by ? `<button class="small" data-edit="${esc(c.managed_by.id)}">Edit</button>` : `<button class="small" data-adopt="${i}">Manage here</button>`}
+          <button class="small danger" data-del="${i}">Delete</button></td></tr>`).join("");
+    box.append(t);
+    list.forEach((c, i) => api("GET", `/api/servers/${s.id}/collections/${c.id}/home?section=${encodeURIComponent(c.section || "")}`)
+      .then((r) => { $(`[data-home="${i}"]`, t).textContent = r.home || "—"; }).catch(() => {}));
+    $$("[data-edit]", t).forEach((b) => (b.onclick = async () => { await loadCollections(); editCollection(b.dataset.edit); }));
+    $$("[data-adopt]", t).forEach((b) => (b.onclick = async () => {
+      const c = list[b.dataset.adopt];
+      try { const made = await api("POST", `/api/servers/${s.id}/collections/${c.id}/adopt`); toast(`"${c.name}" is now managed here`);
+        await loadCollections(); loadServerCollections(); editCollection(made.id); } catch (e) { toast(e.message, true); }
+    }));
+    $$("[data-del]", t).forEach((b) => (b.onclick = async () => {
+      const c = list[b.dataset.del];
+      if (!confirm(`Delete "${c.name}" on ${s.name}${c.library ? " (" + c.library + ")" : ""}?\n\nThe collection is removed from the server now. The movies and shows in it are not touched.`)) return;
+      try { await api("DELETE", `/api/servers/${s.id}/collections/${c.id}`); toast("Deleted"); loadCollections(); loadServerCollections(); }
+      catch (e) { toast(e.message, true); }
+    }));
+  }
+}
+
 async function loadCollections() {
   collections = await api("GET", "/api/collections");
   const names = Object.fromEntries(settings.servers.map((s) => [s.id, s.name || s.kind]));
@@ -311,6 +349,7 @@ async function editCollection(id) {
   f.append(tg);
   f.append(sourceList("Titles from", c.sources), sourceList("Leave out titles from", c.exclude));
   f.append(artworkEditor(c));
+  f.append(homeEditor(c));
   const btns = document.createElement("div"); btns.className = "row between";
   btns.innerHTML = `<span>${id ? '<button type="button" class="danger" data-a="del">Delete</button>' : ""}</span>
     <span class="row"><button value="cancel">Cancel</button><button type="button" class="primary" data-a="save">Save</button></span>`;
@@ -365,6 +404,47 @@ function sourceList(title, list) {
   add.onclick = () => { list.push({ type: "mdblist", value: "", label: "" }); draw(); };
   fs.append(add); return fs;
 }
+const EMBY_SORTS = [["ProductionYear|Descending", "Newest first (release year)"], ["DateCreated|Descending", "Recently added first"],
+  ["default|Ascending", "Collection order"], ["SortName|Ascending", "Name"], ["CommunityRating|Descending", "Highest rated first"]];
+function homeEditor(c) {
+  c.home = Object.assign({ enabled: false, name: "", emby_sort: "ProductionYear|Descending", emby_view: "", emby_users: [],
+    plex_recommended: true, plex_home: true, plex_shared: false }, c.home || {});
+  const h = c.home, fs = document.createElement("fieldset");
+  fs.innerHTML = "<legend>Home screen</legend>";
+  const body = document.createElement("div");
+  const draw = () => {
+    body.innerHTML = "";
+    if (!h.enabled) return;
+    const emby = settings.servers.filter((s) => s.kind === "emby" && (!c.servers.length || c.servers.includes(s.id)));
+    const plex = settings.servers.filter((s) => s.kind === "plex" && (!c.servers.length || c.servers.includes(s.id)));
+    if (emby.length) {
+      body.insertAdjacentHTML("beforeend", '<h3>Emby</h3>');
+      body.append(fieldRow(h, ["name", "Row name", "text", c.name || "the collection's name"]),
+        fieldRow(h, ["emby_sort", "Sort", "select", EMBY_SORTS]),
+        fieldRow(h, ["emby_view", "Style", "select", [["", "Cards"], ["spotlight", "Spotlight (large banners)"]]]));
+      const us = document.createElement("div"); us.className = "field";
+      us.innerHTML = '<label>Users</label><div class="ctl libs"><span class="hint">Loading…</span></div><div class="help">None ticked: every user. Emby rows are per user.</div>';
+      body.append(us);
+      Promise.all(emby.map((s) => api("GET", `/api/servers/${s.id}/users`).catch(() => []))).then((all) => {
+        const ctl = $(".ctl", us); ctl.innerHTML = "";
+        all.flat().forEach((u) => { const lab = document.createElement("label");
+          const cb = Object.assign(document.createElement("input"), { type: "checkbox", checked: h.emby_users.includes(u.id) });
+          cb.onchange = () => { h.emby_users = cb.checked ? [...h.emby_users, u.id] : h.emby_users.filter((x) => x !== u.id); };
+          lab.append(cb, u.name); ctl.append(lab); });
+      });
+    }
+    if (plex.length) {
+      body.insertAdjacentHTML("beforeend", '<h3>Plex</h3>');
+      body.append(fieldRow(h, ["plex_recommended", "Library Recommended", "check"]),
+        fieldRow(h, ["plex_home", "Your Home page", "check"]), fieldRow(h, ["plex_shared", "Friends' Home pages", "check"]));
+    }
+    body.insertAdjacentHTML("beforeend", '<p class="hint">Applied on the next sync of this collection.</p>');
+  };
+  fs.append(fieldRow(h, ["enabled", "Show on home screens", "check", null, "Off: rows this page added are removed on the next sync"], draw), body);
+  draw();
+  return fs;
+}
+
 function artworkEditor(c) {
   const a = c.artwork, fs = document.createElement("fieldset"); fs.innerHTML = "<legend>Poster</legend>";
   const body = document.createElement("div"); fs.append(body);

@@ -198,3 +198,61 @@ def test_categories_found_in_fallback_location(tmp_path, monkeypatch):
     monkeypatch.setattr(sources, "CATEGORY_CANDIDATES", ["/nope/categories.json", str(f)])
     assert [c["value"] for c in sources.xtream_categories("/xtreamfs/categories.json")] == ["movie:3"]
     assert sources.resolve_xtream("movie:3", "/xtreamfs/categories.json").refs[0].tmdb == "1"
+
+
+def test_home_screens_on_both_servers(ctx, emby, plex, web):
+    from app.settings import HomeSettings
+    e, p = libraries(emby, plex)
+    web.mdb_lists["lists/me/dune"] = [{"imdb_id": "tt1"}, {"imdb_id": "tt2"}]
+    home = HomeSettings(enabled=True, name="Dune Row", emby_sort="DateCreated|Descending", emby_view="spotlight",
+                        emby_users=["u2"], plex_recommended=True, plex_home=True, plex_shared=False)
+    col = CollectionDef(id="c1", name="Dune Saga", artwork=Artwork(mode="None"), home=home,
+                        sources=[Source(type="mdblist", value="me/dune")])
+    configure(ctx, servers(emby, plex), [col])
+    run_collections(ctx, Job("c"))
+    bid = boxsets(emby)["Dune Saga"]
+    rows = [s for s in emby.home["u2"] if s.get("ParentId") == bid]
+    assert len(rows) == 1 and rows[0]["CustomName"] == "Dune Row" and rows[0]["ViewType"] == "spotlight"
+    assert rows[0]["SortBy"] == "DateCreated" and rows[0]["SortOrder"] == "Descending"
+    assert not any(s.get("ParentId") == bid for s in emby.home["u1"])            # only the chosen user
+    assert [s["SectionType"] for s in emby.home["u1"]] == ["resume"]             # their own sections untouched
+    rk = plex_cols(plex)[("Dune Saga", "1")]
+    hub = plex.hubs["1"][0]
+    assert hub["identifier"] == f"custom.collection.1.{rk}"
+    assert hub["promotedToOwnHome"] == "1" and hub["promotedToSharedHome"] == "0"
+    calls = len(emby.calls)
+    run_collections(ctx, Job("c"))                                               # unchanged: not sent again
+    assert not any("HomeSections" in c[1] and c[0] == "POST" for c in emby.calls[calls:])
+    # Turned off: rows removed everywhere.
+    col.home.enabled = False
+    configure(ctx, servers(emby, plex), [col])
+    run_collections(ctx, Job("c"))
+    assert not any(s.get("ParentId") == bid for s in emby.home["u2"])
+    assert plex.hubs["1"] == []
+
+
+def test_server_collections_api_adopt_and_delete(ctx, emby, plex, web, monkeypatch):
+    import importlib
+    from fastapi.testclient import TestClient
+    import app.main as main
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
+    monkeypatch.setattr(main, "ctx", ctx)
+    e, p = libraries(emby, plex)
+    fav = emby.add("BoxSet", "Favourites", "")
+    emby.children[fav] = [e["dune"]]
+    old = emby.add("BoxSet", "Old Junk", "")
+    configure(ctx, servers(emby, plex), [])
+    with TestClient(main.app) as c:
+        lst = c.get("/api/servers/e1/collections").json()
+        assert [x["name"] for x in lst] == ["Favourites", "Old Junk"] and lst[0]["managed_by"] is None
+        made = c.post(f"/api/servers/e1/collections/{fav}/adopt").json()
+        assert made["name"] == "Favourites" and made["sources"][0]["value"] == "e1:Favourites"
+        assert c.get("/api/servers/e1/collections").json()[0]["managed_by"]["name"] == "Favourites"
+        assert c.post(f"/api/servers/e1/collections/{fav}/adopt").status_code == 400
+        assert c.delete(f"/api/servers/e1/collections/{old}").json()["ok"]
+        assert "Old Junk" not in boxsets(emby)
+        users = c.get("/api/servers/e1/users").json()
+        assert [u["name"] for u in users] == ["admin", "kid"]
+    # The adopted collection syncs to its own server without changes.
+    run_collections(ctx, Job("c"))
+    assert emby.children[fav] == [e["dune"]] and list(boxsets(emby)) == ["Favourites"]

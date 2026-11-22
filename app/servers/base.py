@@ -170,6 +170,17 @@ class MediaServer:
     def remove_from_collection(self, collection_id: str, item_ids: List[str]) -> None:
         raise NotImplementedError
 
+    def users(self) -> List[dict]:
+        """[{id, name}] for servers with per-user home screens (Emby); [] otherwise."""
+        return []
+
+    def home_status(self, collection_id: str, section: str = "") -> str:
+        """Short description of where the collection is shown on home screens."""
+        return ""
+
+    def set_home(self, collection_id: str, section: str, home, title: str) -> None:
+        """Show the collection on home screens as home (HomeSettings) says, or remove it when home.enabled is off."""
+
     def delete_collection(self, collection_id: str) -> None:
         raise NotImplementedError
 

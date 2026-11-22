@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import base64
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .base import Item, Library, MediaServer, RemoteCollection, ServerError, Stream, norm_ids
 
@@ -239,6 +239,41 @@ class EmbyServer(MediaServer):
                 changed = True
         if changed:
             self._request("POST", self._base() + f"/Items/{collection_id}", json_body=item, expect_json=False)
+
+    def users(self) -> List[dict]:
+        return [{"id": str(u["Id"]), "name": u.get("Name") or ""} for u in self._get("/Users") or []]
+
+    def _sections(self, uid: str) -> List[dict]:
+        r = self._get(f"/Users/{uid}/HomeSections", IsEditMode="true")
+        return r if isinstance(r, list) else (r or {}).get("Items") or (r or {}).get("Sections") or []
+
+    @staticmethod
+    def _row(sections: List[dict], collection_id: str) -> Optional[dict]:
+        return next((s for s in sections if s.get("SectionType") == "boxset"
+                     and str(s.get("ParentId")) == str(collection_id)), None)
+
+    def home_status(self, collection_id: str, section: str = "") -> str:
+        users = self.users()
+        have = [u["name"] for u in users if self._row(self._sections(u["id"]), collection_id)]
+        return f"home screen of {len(have)} of {len(users)} users" if have else ""
+
+    def set_home(self, collection_id: str, section: str, home, title: str) -> None:
+        wanted = set(home.emby_users) if home.emby_users else None
+        sort_by, _, order = (home.emby_sort or "ProductionYear|Descending").partition("|")
+        for u in self.users():
+            on = home.enabled and (wanted is None or u["id"] in wanted)
+            row = self._row(self._sections(u["id"]), collection_id)
+            if on:
+                body = dict(row or {})
+                body.update({"SectionType": "boxset", "ParentId": str(collection_id), "CustomName": home.name or title,
+                             "SortBy": sort_by, "SortOrder": order or "Ascending", "ViewType": home.emby_view or None,
+                             "ItemTypes": (row or {}).get("ItemTypes") or [],
+                             "ExcludedFolders": (row or {}).get("ExcludedFolders") or [], "IncludeNextUpInResume": True})
+                body.pop("ParentItem", None)
+                self._request("POST", self._base() + f"/Users/{u['id']}/HomeSections", json_body=body, expect_json=False)
+            elif row:
+                self._request("POST", self._base() + f"/Users/{u['id']}/HomeSections/Delete",
+                              json_body={"Ids": [row["Id"]]}, expect_json=False)
 
     def _admin_user(self) -> str:
         if not hasattr(self, "_admin"):
