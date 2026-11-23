@@ -301,8 +301,9 @@ async function loadServerCollections() {
         <td style="white-space:nowrap">${c.managed_by ? `<button class="small" data-edit="${esc(c.managed_by.id)}">Edit</button>` : `<button class="small" data-adopt="${i}">Manage here</button>`}
           <button class="small danger" data-del="${i}">Delete</button></td></tr>`).join("");
     box.append(t);
-    list.forEach((c, i) => api("GET", `/api/servers/${s.id}/collections/${c.id}/home?section=${encodeURIComponent(c.section || "")}`)
-      .then((r) => { $(`[data-home="${i}"]`, t).textContent = r.home || "—"; }).catch(() => {}));
+    api("GET", `/api/servers/${s.id}/collections/home`)
+      .then((homes) => list.forEach((c, i) => { $(`[data-home="${i}"]`, t).textContent = homes[c.id] || "—"; }))
+      .catch(() => list.forEach((c, i) => { $(`[data-home="${i}"]`, t).textContent = "?"; }));
     $$("[data-edit]", t).forEach((b) => (b.onclick = async () => { await loadCollections(); editCollection(b.dataset.edit); }));
     $$("[data-adopt]", t).forEach((b) => (b.onclick = async () => {
       const c = list[b.dataset.adopt];

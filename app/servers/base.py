@@ -186,6 +186,16 @@ class MediaServer:
         """Short description of where the collection is shown on home screens."""
         return ""
 
+    def home_statuses(self, collections: List[RemoteCollection]) -> Dict[str, str]:
+        """home_status for several collections at once (servers where that's slow override this)."""
+        out = {}
+        for c in collections:
+            try:
+                out[c.id] = self.home_status(c.id, c.section)
+            except ServerError:
+                out[c.id] = ""
+        return out
+
     def set_home(self, collection_id: str, section: str, home, title: str) -> None:
         """Show the collection on home screens as home (HomeSettings) says, or remove it when home.enabled is off."""
 

@@ -135,6 +135,16 @@ def server_collections(sid: str):
         raise HTTPException(502, str(e))
 
 
+@app.get("/api/servers/{sid}/collections/home")
+def server_collections_home(sid: str):
+    """Where each of the server's collections is shown on home screens, in one call."""
+    srv = _server(sid)
+    try:
+        return srv.home_statuses(srv.collections())
+    except ServerError as e:
+        raise HTTPException(502, str(e))
+
+
 @app.get("/api/servers/{sid}/collections/{rid}/home")
 def server_collection_home(sid: str, rid: str, section: str = ""):
     try:

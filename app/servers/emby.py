@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional
 
 from .base import Item, Library, MediaServer, RemoteCollection, ServerError, Stream, norm_ids
@@ -314,6 +315,17 @@ class EmbyServer(MediaServer):
         users = self.users()
         have = [u["name"] for u in users if self._row(self._sections(u["id"]), collection_id)]
         return f"home screen of {len(have)} of {len(users)} users" if have else ""
+
+    def home_statuses(self, collections: List[RemoteCollection]) -> Dict[str, str]:
+        # Each user's home sections are read once (Emby can take seconds per user when busy), not once per collection.
+        users = self.users()
+        with ThreadPoolExecutor(min(8, max(1, len(users)))) as pool:
+            sections = list(pool.map(lambda u: self._sections(u["id"]), users))
+        out = {}
+        for c in collections:
+            have = [u for u, secs in zip(users, sections) if self._row(secs, c.id)]
+            out[c.id] = f"home screen of {len(have)} of {len(users)} users" if have else ""
+        return out
 
     def set_home(self, collection_id: str, section: str, home, title: str) -> None:
         wanted = set(home.emby_users) if home.emby_users else None

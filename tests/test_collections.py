@@ -220,6 +220,13 @@ def test_home_screens_on_both_servers(ctx, emby, plex, web):
     hub = plex.hubs["1"][0]
     assert hub["identifier"] == f"custom.collection.1.{rk}"
     assert hub["promotedToOwnHome"] == "1" and hub["promotedToSharedHome"] == "0"
+    # The Collections tab reads every collection's home-screen status in one call per server.
+    from app.servers.plex import make_server
+    esrv, psrv = (make_server(c) for c in servers(emby, plex))
+    ehome = esrv.home_statuses(esrv.collections())
+    assert ehome[bid] == "home screen of 1 of 2 users"
+    assert all(v == "" for k, v in ehome.items() if k != bid)
+    assert psrv.home_statuses(psrv.collections())[rk] == "Recommended, your Home"
     calls = len(emby.calls)
     run_collections(ctx, Job("c"))                                               # unchanged: not sent again
     assert not any("HomeSections" in c[1] and c[0] == "POST" for c in emby.calls[calls:])
