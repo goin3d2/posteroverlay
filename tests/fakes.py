@@ -85,6 +85,8 @@ class FakeEmby(_Server):
         self.readonly = set()       # items whose poster is a file in a read-only folder
         self.missing = set()        # items whose poster file was deleted
         self.refreshes = []
+        self.no_backdrop = set()    # items with no background image
+        self.online = {}            # items with no poster that a refresh would download: id -> image
         self.home = {"u1": [{"Id": "s1", "SectionType": "resume"}], "u2": []}   # user -> home sections
         self.next_id = 1000
         super().__init__()
@@ -114,6 +116,8 @@ class FakeEmby(_Server):
     def view(self, it, fields):
         d = {k: v for k, v in it.items() if not k.startswith("_") and k != "MediaSources"}
         d["ImageTags"] = self.tag(it["Id"])
+        if it["Type"] in ("Movie", "Series"):
+            d["BackdropImageTags"] = [] if it["Id"] in self.no_backdrop else ["b1"]
         if "MediaSources" in fields:
             d["MediaSources"] = it["MediaSources"]
         if it["Type"] == "BoxSet":
@@ -171,6 +175,10 @@ class FakeEmby(_Server):
                 self.readonly.discard(iid)                     # now the TMDB poster, kept in Emby's own data
                 self.missing.discard(iid)
                 self.set_image(iid, poster_bytes((90, 90, 30)))
+            if q.get("ReplaceAllImages") == "false" and q.get("ImageRefreshMode") == "FullRefresh":
+                if iid in self.online:
+                    self.set_image(iid, self.online.pop(iid))
+                self.no_backdrop.discard(iid)
             return 204, "text/plain", b""
         if p.startswith("/Items/") and p.endswith("/Images") and method == "GET":
             iid = p.split("/")[2]

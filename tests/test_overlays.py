@@ -265,3 +265,38 @@ def test_emby_poster_file_missing(ctx, emby, web, monkeypatch):
     assert "1 posters pointed at a file that's gone" in res and "0 failed" in res, res
     assert is_ours(emby.images[m2])
     assert emby.refreshes == [(m2, "true")]
+
+
+def test_emby_missing_images_fetched(ctx, emby, web, monkeypatch):
+    import app.overlays as ov
+    monkeypatch.setattr(ov, "MISSING_IMAGES_PACE", 0)
+    m1, m1b, m2, show, s1, s2 = emby_library(emby)
+    # Emby dropped m2's poster (its file was deleted); m1 has a poster but no background; s2 has no poster.
+    emby.online[m2] = emby.images.pop(m2)
+    emby.no_backdrop.add(m1)
+    emby.online[s2] = emby.images.pop(s2)
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
+    run_overlays(ctx, "e1", Job("t"))
+    asked = sorted(i for i, r in emby.refreshes if r == "false")
+    assert asked == sorted([m2, m1, s2])
+    assert m2 in emby.images and s2 in emby.images and m1 not in emby.no_backdrop
+    # The next run draws on the downloaded posters and doesn't ask again.
+    emby.refreshes.clear()
+    run_overlays(ctx, "e1", Job("t"))
+    assert is_ours(emby.images[m2]) and is_ours(emby.images[s2])
+    assert [r for r in emby.refreshes if r[1] == "false"] == []
+
+
+def test_emby_missing_images_asked_once_a_week(ctx, emby, web, monkeypatch):
+    import app.overlays as ov
+    monkeypatch.setattr(ov, "MISSING_IMAGES_PACE", 0)
+    m1, m1b, m2, *_ = emby_library(emby)
+    emby.images.pop(m2)          # nothing online either
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
+    run_overlays(ctx, "e1", Job("t"))
+    run_overlays(ctx, "e1", Job("t"))
+    assert [r for r in emby.refreshes if r == (m2, "false")] == [(m2, "false")]
+    s = ctx.settings.get(); s.missing_images_per_run = 0; ctx.settings.save(s)
+    ctx.store.put("imgfetch:e1:" + m2, 0)
+    run_overlays(ctx, "e1", Job("t"))
+    assert [r for r in emby.refreshes if r == (m2, "false")] == [(m2, "false")]

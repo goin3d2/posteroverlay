@@ -55,6 +55,7 @@ REFRESH_POLL = 1.5
 
 class EmbyServer(MediaServer):
     kind = "emby"
+    can_fetch_images = True
 
     def _headers(self):
         return {"X-Emby-Token": self.token, "Accept": "application/json"}
@@ -108,6 +109,7 @@ class EmbyServer(MediaServer):
             status=it.get("Status") or "",
             version_key=it.get("PresentationUniqueKey") or "",
             premiere=(it.get("PremiereDate") or "")[:10],
+            has_backdrop=bool(it.get("BackdropImageTags")) if kind in ("movie", "show") else None,
         )
 
     def items(self) -> List[Item]:
@@ -117,7 +119,7 @@ class EmbyServer(MediaServer):
                 continue
             types = "Movie" if lib.kind == "movie" else "Series"
             for it in self._paged(ParentId=lib.id, Recursive="true", IncludeItemTypes=types, Fields=ITEM_FIELDS,
-                                  EnableImageTypes="Primary"):
+                                  EnableImageTypes="Primary,Backdrop"):
                 out.append(self._item(it, lib.id))
         # A title in two libraries (or a .strm and a file) appears once per item; that's what Emby shows.
         return out
@@ -210,6 +212,13 @@ class EmbyServer(MediaServer):
             if img.get("ImageType") == "Primary":
                 return img.get("Path") or ""
         return ""
+
+    def fetch_missing_images(self, item_id: str) -> None:
+        # Emby's "Search for missing metadata": fills in what's missing, replaces nothing. Emby works through it in
+        # the background.
+        self._request("POST", self._base() + f"/Items/{item_id}/Refresh", params={
+            "Recursive": "false", "MetadataRefreshMode": "FullRefresh", "ImageRefreshMode": "FullRefresh",
+            "ReplaceAllImages": "false", "ReplaceAllMetadata": "false"}, expect_json=False)
 
     def _replace_local_poster(self, item_id: str) -> None:
         before = self._poster_path(item_id)

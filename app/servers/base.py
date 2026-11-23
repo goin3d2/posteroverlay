@@ -48,6 +48,7 @@ class Item:
     status: str = ""          # Emby series status: Continuing / Ended
     version_key: str = ""     # items with the same key are versions of one title
     premiere: str = ""
+    has_backdrop: Optional[bool] = None   # None: not known (Plex, seasons)
 
 
 @dataclass
@@ -74,6 +75,7 @@ class MediaServer:
     """Base class. Concrete clients: EmbyServer, PlexServer."""
 
     kind = "base"
+    can_fetch_images = False   # the server can be asked to download missing images
 
     def __init__(self, server_id: str, name: str, url: str, token: str, libraries: Sequence[str] = ()):
         self.server_id = server_id
@@ -85,6 +87,10 @@ class MediaServer:
         self.timeout = 60
         self.readonly_fixed = 0     # posters moved off a read-only file before uploading (Emby)
         self.missing_fixed = 0      # posters whose file was gone, fetched online again first (Emby)
+
+    def fetch_missing_images(self, item_id: str) -> None:
+        """Ask the server to download images the item doesn't have (keeping the ones it has)."""
+        raise NotImplementedError
 
     # ---- plumbing
     def _request(self, method: str, path: str, *, params=None, data=None, headers=None, json_body=None,

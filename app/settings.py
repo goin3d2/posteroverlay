@@ -246,6 +246,9 @@ class Settings(BaseModel):
     xtream_categories_path: str = "/xtreamfs/categories.json"
     # Originals are kept at most this wide (pixels); posters are drawn and uploaded at that size.
     original_max_width: int = 1000
+    # Titles with no poster or background (e.g. the file was deleted): ask the server to download them, at most
+    # this many per run, a few a second; each title is asked again at most once a week. 0: off.
+    missing_images_per_run: int = 20000
     # Posters drawn and uploaded at the same time.
     overlay_workers: int = 4
     style: Style = Field(default_factory=Style)

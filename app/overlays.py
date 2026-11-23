@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import threading
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple
@@ -29,6 +30,8 @@ EPISODE_SAMPLE = 10
 LIST_WORKERS = 6
 PREVIEW_LIMIT = 200
 DAY = 86400
+MISSING_IMAGES_RETRY = 7 * DAY
+MISSING_IMAGES_PACE = 0.4   # seconds between refresh requests, so the server isn't swamped
 
 
 def _ratings_key(item: Item, kind: str) -> Optional[Tuple[str, str, str]]:
@@ -107,6 +110,7 @@ class OverlayRun:
                 self.only = {i.id for i in movies + shows + seasons}
         self.log(f"{self.server.name}: {len(movies)} movies, {len(shows)} shows, {len(seasons)} seasons")
 
+        self._missing_images(movies, shows, seasons)
         self._ratings(movies, shows)
         status = self._statuses(shows)
         quality = self._quality(movies, shows)
@@ -216,6 +220,53 @@ class OverlayRun:
             self.job.done += 1
         self.log(f"MDBList: {fetched} titles updated in {mdb.calls} calls, {len(queue) - fetched} still waiting")
         self.store.put(f"meta:mdblist_waiting:{self.cfg.id}", len(queue) - fetched)
+
+    def _missing_images(self, movies: List[Item], shows: List[Item], seasons: List[Item]) -> None:
+        """Titles with no poster (or no background) that the server could find online: ask it to fetch them.
+        The server downloads in the background, so these get their overlay on the next run."""
+        limit = int(self.settings.missing_images_per_run or 0)
+        if self.dry_run or self.only or limit <= 0 or not self.server.can_fetch_images:
+            return
+        has_ids = {sh.id for sh in shows if sh.ids}
+        wanted = [it for it in movies + shows if it.ids and (not it.marker or it.has_backdrop is False)]
+        wanted += [se for se in seasons if not se.marker and se.parent in has_ids]
+        if not wanted:
+            return
+        prefix = f"imgfetch:{self.cfg.id}:"
+        asked = self.store.get_prefix(prefix)
+        now = time.time()
+        due = [it for it in wanted if now - float(asked.get(it.id) or 0) > MISSING_IMAGES_RETRY]
+        waiting = len(wanted) - len(due)
+        if not due:
+            self.log(f"{len(wanted)} titles have no poster or background; all were asked for in the last week")
+            return
+        # Movies and shows first (seasons fall back to the show's poster).
+        due.sort(key=lambda it: it.kind == "season")
+        batch = due[:limit]
+        job = self.job
+        job.phase = "fetching missing posters and backgrounds"
+        job.total, job.done = len(batch), 0
+        sent, errors = 0, 0
+        for it in batch:
+            if job.cancel.is_set():
+                break
+            try:
+                self.server.fetch_missing_images(it.id)
+                sent += 1
+                errors = 0
+            except ServerError as e:
+                errors += 1
+                if errors >= 20:
+                    self.log(f"Asking {self.server.name} for missing images stopped after 20 errors in a row: {e}",
+                             "warn")
+                    break
+            self.store.put(prefix + it.id, now)
+            job.done += 1
+            time.sleep(MISSING_IMAGES_PACE)
+        left = len(due) - sent
+        self.log(f"{self.server.name}: {sent} titles with no poster or background were refreshed online; "
+                 f"{left} left for later runs, {waiting} asked for in the last week. They get their overlays on the "
+                 "next run")
 
     def _statuses(self, shows: List[Item]) -> Dict[str, str]:
         tmdb = Tmdb(self.settings.tmdb_key)
