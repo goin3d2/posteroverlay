@@ -241,3 +241,15 @@ def test_unticked_movies_are_not_read(ctx, emby, web):
     assert "updated 3 posters" in res, res      # the show and its 2 seasons
     assert not is_ours(emby.images[m1])
     assert ctx.store.get_prefix("q:e1:") and not any(k.startswith(f"{m1}|") for k in ctx.store.get_prefix("q:e1:"))
+
+
+def test_emby_read_only_poster_file(ctx, emby, web, monkeypatch):
+    import app.servers.emby as em
+    monkeypatch.setattr(em, "REFRESH_POLL", 0.01)
+    m1, m1b, m2, *_ = emby_library(emby)
+    emby.readonly.add(m2)
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
+    res = run_overlays(ctx, "e1", Job("t"))
+    assert "1 posters were read-only files" in res and "0 failed" in res, res
+    assert is_ours(emby.images[m2])
+    assert emby.refreshes == [(m2, "true")]

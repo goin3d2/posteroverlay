@@ -202,11 +202,15 @@ def _enabled_ids() -> List[str]:
 
 
 @app.post("/api/jobs/overlays")
-def start_overlays(server: Optional[str] = None):
+def start_overlays(server: Optional[str] = None, items: Optional[str] = None):
+    """items: comma-separated item ids (with server) to draw only those."""
     ids = [server] if server else _enabled_ids()
     if not ids:
         raise HTTPException(400, "No server is set up yet")
-    return {"started": ctx.start("overlays", _overlay_job(ids))}
+    only = [i.strip() for i in items.split(",") if i.strip()] if items else None
+    if only and not server:
+        raise HTTPException(400, "Choose the server for these items")
+    return {"started": ctx.start("overlays", _overlay_job(ids, only))}
 
 
 @app.post("/api/jobs/restore")

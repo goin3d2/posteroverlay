@@ -82,6 +82,8 @@ class FakeEmby(_Server):
         self.libs = [{"ItemId": "1", "Name": "Movies", "CollectionType": "movies"},
                      {"ItemId": "2", "Name": "TV shows", "CollectionType": "tvshows"}]
         self.plugins = []
+        self.readonly = set()       # items whose poster is a file in a read-only folder
+        self.refreshes = []
         self.home = {"u1": [{"Id": "s1", "SectionType": "resume"}], "u2": []}   # user -> home sections
         self.next_id = 1000
         super().__init__()
@@ -155,8 +157,21 @@ class FakeEmby(_Server):
                 if iid not in self.images:
                     return 404, "text/plain", b"none"
                 return 200, "image/jpeg", self.images[iid]
+            if iid in self.readonly:
+                return 500, "text/plain", f"Access to the path '/vod/{iid}/poster.jpg' is denied.".encode()
             self.set_image(iid, base64.b64decode(body))
             return 204, "text/plain", b""
+        if p.startswith("/Items/") and p.endswith("/Refresh") and method == "POST":
+            iid = p.split("/")[2]
+            self.refreshes.append((iid, q.get("ReplaceAllImages")))
+            if q.get("ReplaceAllImages") == "true" and iid in self.readonly:
+                self.readonly.discard(iid)                     # now the TMDB poster, kept in Emby's own data
+                self.set_image(iid, poster_bytes((90, 90, 30)))
+            return 204, "text/plain", b""
+        if p.startswith("/Items/") and p.endswith("/Images") and method == "GET":
+            iid = p.split("/")[2]
+            path = f"/vod/{iid}/poster.jpg" if iid in self.readonly else "https://image.tmdb.org/t/p/original/x.jpg"
+            return 200, "", [{"ImageType": "Primary", "Path": path}] if iid in self.images else []
         if p.startswith("/Items/") and method == "DELETE":
             iid = p.split("/")[2]
             self.items.pop(iid, None)

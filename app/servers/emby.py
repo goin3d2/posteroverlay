@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import time
 from typing import Dict, List, Optional
 
 from .base import Item, Library, MediaServer, RemoteCollection, ServerError, Stream, norm_ids
@@ -47,6 +48,9 @@ def to_streams(source: dict) -> List[Stream]:
             out.append(Stream("audio", (s.get("Codec") or "").lower(), s.get("Profile") or "",
                               " ".join(x for x in (s.get("Title"), s.get("DisplayTitle")) if x)))
     return out
+
+
+REFRESH_POLL = 1.5
 
 
 class EmbyServer(MediaServer):
@@ -171,10 +175,43 @@ class EmbyServer(MediaServer):
         return image_marker(items[0].get("ImageTags")) if items else ""
 
     def upload_poster(self, item_id: str, image: bytes, content_type: str = "image/jpeg") -> str:
+        try:
+            self._upload(item_id, image, content_type)
+        except ServerError as e:
+            if "Access to the path" not in str(e):
+                raise
+            # The poster is a file in a read-only folder (e.g. an xtreamfs poster.jpg next to a .strm), and Emby saves
+            # a replacement where the current one is. Refreshing the images with "replace all" switches the poster to
+            # the online one, after which Emby keeps uploads in its own metadata folder.
+            self._replace_local_poster(item_id)
+            self._upload(item_id, image, content_type)
+            self.readonly_fixed += 1
+        return self.poster_marker(item_id)
+
+    def _upload(self, item_id: str, image: bytes, content_type: str) -> None:
         # Emby takes the image base64-encoded in the request body.
         self._request("POST", self._base() + f"/Items/{item_id}/Images/Primary", data=base64.b64encode(image),
                       headers={"Content-Type": content_type}, expect_json=False)
-        return self.poster_marker(item_id)
+
+    def _poster_path(self, item_id: str) -> str:
+        for img in self._get(f"/Items/{item_id}/Images") or []:
+            if img.get("ImageType") == "Primary":
+                return img.get("Path") or ""
+        return ""
+
+    def _replace_local_poster(self, item_id: str) -> None:
+        before = self._poster_path(item_id)
+        self._request("POST", self._base() + f"/Items/{item_id}/Refresh", params={
+            "Recursive": "false", "MetadataRefreshMode": "Default", "ImageRefreshMode": "FullRefresh",
+            "ReplaceAllImages": "true", "ReplaceAllMetadata": "false"}, expect_json=False)
+        # Emby refreshes in the background.
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            time.sleep(REFRESH_POLL)
+            now = self._poster_path(item_id)
+            if now != before:
+                return
+        raise ServerError(f"{self.name}: the poster is a file in a read-only folder ({before}) and Emby kept it")
 
     def warnings(self) -> List[str]:
         out = []

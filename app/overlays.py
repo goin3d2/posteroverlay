@@ -437,6 +437,9 @@ class OverlayRun:
                    f"{c['restored']} restored to the original, {c['skipped']} skipped, {c['failed']} failed")
         if self.source_cfg:
             summary += f"; {c['from_source']} drawn on {self.source_cfg.name}'s original"
+        if self.server.readonly_fixed:
+            summary += (f"; {self.server.readonly_fixed} posters were read-only files (e.g. xtreamfs poster.jpg), so "
+                        "their images were refreshed first")
         if self.dry_run:
             summary += (f". Preview only: nothing was sent to the server; {len(drawn)} sample posters drawn in preview/ "
                         "(turn on \"Apply changes to servers\").")

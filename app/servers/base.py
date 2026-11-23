@@ -83,6 +83,7 @@ class MediaServer:
         self.only_libraries = [str(x) for x in libraries or []]
         self.session = requests.Session()
         self.timeout = 60
+        self.readonly_fixed = 0     # posters moved off a read-only file before uploading (Emby)
 
     # ---- plumbing
     def _request(self, method: str, path: str, *, params=None, data=None, headers=None, json_body=None,
