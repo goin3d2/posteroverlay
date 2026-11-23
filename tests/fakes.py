@@ -83,6 +83,7 @@ class FakeEmby(_Server):
                      {"ItemId": "2", "Name": "TV shows", "CollectionType": "tvshows"}]
         self.plugins = []
         self.readonly = set()       # items whose poster is a file in a read-only folder
+        self.missing = set()        # items whose poster file was deleted
         self.refreshes = []
         self.home = {"u1": [{"Id": "s1", "SectionType": "resume"}], "u2": []}   # user -> home sections
         self.next_id = 1000
@@ -154,6 +155,8 @@ class FakeEmby(_Server):
         if p.startswith("/Items/") and p.endswith("/Images/Primary"):
             iid = p.split("/")[2]
             if method == "GET":
+                if iid in self.missing:
+                    return 404, "text/plain", f"The file '/vod/{iid}/poster.jpg' could not be found.".encode()
                 if iid not in self.images:
                     return 404, "text/plain", b"none"
                 return 200, "image/jpeg", self.images[iid]
@@ -164,13 +167,14 @@ class FakeEmby(_Server):
         if p.startswith("/Items/") and p.endswith("/Refresh") and method == "POST":
             iid = p.split("/")[2]
             self.refreshes.append((iid, q.get("ReplaceAllImages")))
-            if q.get("ReplaceAllImages") == "true" and iid in self.readonly:
+            if q.get("ReplaceAllImages") == "true" and (iid in self.readonly or iid in self.missing):
                 self.readonly.discard(iid)                     # now the TMDB poster, kept in Emby's own data
+                self.missing.discard(iid)
                 self.set_image(iid, poster_bytes((90, 90, 30)))
             return 204, "text/plain", b""
         if p.startswith("/Items/") and p.endswith("/Images") and method == "GET":
             iid = p.split("/")[2]
-            path = f"/vod/{iid}/poster.jpg" if iid in self.readonly else "https://image.tmdb.org/t/p/original/x.jpg"
+            path = f"/vod/{iid}/poster.jpg" if iid in self.readonly or iid in self.missing else "https://image.tmdb.org/t/p/original/x.jpg"
             return 200, "", [{"ImageType": "Primary", "Path": path}] if iid in self.images else []
         if p.startswith("/Items/") and method == "DELETE":
             iid = p.split("/")[2]

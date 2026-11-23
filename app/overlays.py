@@ -437,6 +437,9 @@ class OverlayRun:
                    f"{c['restored']} restored to the original, {c['skipped']} skipped, {c['failed']} failed")
         if self.source_cfg:
             summary += f"; {c['from_source']} drawn on {self.source_cfg.name}'s original"
+        if self.server.missing_fixed:
+            summary += (f"; {self.server.missing_fixed} posters pointed at a file that's gone (e.g. a removed xtreamfs "
+                        "poster.jpg), so Emby fetched them online first")
         if self.server.readonly_fixed:
             summary += (f"; {self.server.readonly_fixed} posters were read-only files (e.g. xtreamfs poster.jpg), so "
                         "their images were refreshed first")

@@ -84,6 +84,7 @@ class MediaServer:
         self.session = requests.Session()
         self.timeout = 60
         self.readonly_fixed = 0     # posters moved off a read-only file before uploading (Emby)
+        self.missing_fixed = 0      # posters whose file was gone, fetched online again first (Emby)
 
     # ---- plumbing
     def _request(self, method: str, path: str, *, params=None, data=None, headers=None, json_body=None,

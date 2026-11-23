@@ -164,6 +164,18 @@ class EmbyServer(MediaServer):
         return out
 
     def get_poster(self, item_id: str) -> bytes:
+        try:
+            return self._get_poster(item_id)
+        except ServerError as e:
+            if "returned 404" not in str(e) or "could not be found" not in str(e):
+                raise
+            # Emby's poster is a file that no longer exists (e.g. an xtreamfs poster.jpg that was removed). Refreshing
+            # the images with "replace all" makes Emby fetch the online poster into its own metadata folder.
+            self._replace_local_poster(item_id)
+            self.missing_fixed += 1
+            return self._get_poster(item_id)
+
+    def _get_poster(self, item_id: str) -> bytes:
         # EnableImageEnhancers=false: the file itself, without any plugin overlay drawn on it.
         r = self._request("GET", self._base() + f"/Items/{item_id}/Images/Primary",
                           params={"EnableImageEnhancers": "false"}, expect_json=False)
@@ -211,7 +223,7 @@ class EmbyServer(MediaServer):
             now = self._poster_path(item_id)
             if now != before:
                 return
-        raise ServerError(f"{self.name}: the poster is a file in a read-only folder ({before}) and Emby kept it")
+        raise ServerError(f"{self.name}: Emby kept its poster file ({before}) after refreshing its images")
 
     def warnings(self) -> List[str]:
         out = []
