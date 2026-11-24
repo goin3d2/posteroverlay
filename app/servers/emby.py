@@ -214,6 +214,13 @@ class EmbyServer(MediaServer):
                 return img.get("Path") or ""
         return ""
 
+    def library_scan_running(self) -> bool:
+        for t in self._get("/ScheduledTasks", IsHidden="false") or []:
+            if t.get("Key") == "RefreshLibrary" or t.get("Name") == "Scan media library":
+                if t.get("State") == "Running":
+                    return True
+        return False
+
     def fetch_missing_images(self, item_id: str) -> None:
         # Emby's "Search for missing metadata": fills in what's missing, replaces nothing. Emby works through it in
         # the background.

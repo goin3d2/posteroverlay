@@ -86,6 +86,7 @@ class FakeEmby(_Server):
         self.missing = set()        # items whose poster file was deleted
         self.refreshes = []
         self.no_backdrop = set()    # items with no background image
+        self.scan_running = 0       # answer 'library scan running' this many more times
         self.online = {}            # items with no poster that a refresh would download: id -> image
         self.home = {"u1": [{"Id": "s1", "SectionType": "resume"}], "u2": []}   # user -> home sections
         self.next_id = 1000
@@ -134,6 +135,12 @@ class FakeEmby(_Server):
             return 200, "", self.libs
         if p == "/Plugins":
             return 200, "", self.plugins
+        if p == "/ScheduledTasks":
+            running = self.scan_running > 0
+            if running:
+                self.scan_running -= 1
+            return 200, "", [{"Key": "RefreshLibrary", "Name": "Scan media library", "State": "Running" if running else "Idle"},
+                             {"Key": "Other", "Name": "Something else", "State": "Running"}]
         if p == "/Users":
             return 200, "", [{"Id": "u1", "Name": "admin", "Policy": {"IsAdministrator": True}},
                              {"Id": "u2", "Name": "kid", "Policy": {"IsAdministrator": False}}]

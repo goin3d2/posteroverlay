@@ -27,7 +27,8 @@ from .servers.plex import make_server
 from .settings import QualityRule, ServerConfig, Settings
 
 EPISODE_SAMPLE = 10
-LIST_WORKERS = 6
+LIST_WORKERS = 2   # parallel listing requests; more has frozen a busy Emby (4.11 beta)
+SCAN_WAIT_POLL = 60   # seconds between checks while the server's library scan runs
 PREVIEW_LIMIT = 200
 DAY = 86400
 MISSING_IMAGES_RETRY = 7 * DAY
@@ -221,6 +222,29 @@ class OverlayRun:
         self.log(f"MDBList: {fetched} titles updated in {mdb.calls} calls, {len(queue) - fetched} still waiting")
         self.store.put(f"meta:mdblist_waiting:{self.cfg.id}", len(queue) - fetched)
 
+    def _wait_for_library_scan(self) -> None:
+        """Hold the heavy listing while the server scans its libraries: Emby 4.11 has frozen (a deadlock) when
+        many listing requests came in during its library scan."""
+        try:
+            busy = self.server.library_scan_running()
+        except ServerError:
+            return
+        if not busy:
+            return
+        phase = self.job.phase
+        self.job.phase = "waiting for the server's library scan to finish"
+        self.log(f"{self.server.name} is scanning its libraries; waiting for that to finish before listing")
+        started = time.time()
+        while busy and not self.job.cancel.is_set():
+            self.job.cancel.wait(SCAN_WAIT_POLL)
+            try:
+                busy = self.server.library_scan_running()
+            except ServerError:
+                busy = False
+        if not self.job.cancel.is_set():
+            self.log(f"{self.server.name}'s library scan finished after waiting {int((time.time() - started) / 60)} min")
+        self.job.phase = phase
+
     def _missing_images(self, movies: List[Item], shows: List[Item], seasons: List[Item]) -> None:
         """Titles with no poster (or no background) that the server could find online: ask it to fetch them.
         The server downloads in the background, so these get their overlay on the next run."""
@@ -342,6 +366,7 @@ class OverlayRun:
         # Episodes: only the ones that decide a badge (latest seasons / recent episodes).
         episodes_by_show: Dict[str, List[Item]] = defaultdict(list)
         if shows and (s.show_quality_on_shows or s.seasons):
+            self._wait_for_library_scan()
             self.job.phase = "listing episodes"
             self.job.total, self.job.done = len(shows), 0
             # Show by show, several at a time: deep pages of one huge episode listing get slower and slower.
@@ -401,6 +426,7 @@ class OverlayRun:
                         fresh.clear()
 
             chunks = [need[i:i + 100] for i in range(0, len(need), 100)]
+            self._wait_for_library_scan()
             with ThreadPoolExecutor(LIST_WORKERS, thread_name_prefix="mediainfo") as pool:
                 list(pool.map(read, chunks))
             if fresh:

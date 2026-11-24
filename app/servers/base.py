@@ -88,6 +88,10 @@ class MediaServer:
         self.readonly_fixed = 0     # posters moved off a read-only file before uploading (Emby)
         self.missing_fixed = 0      # posters whose file was gone, fetched online again first (Emby)
 
+    def library_scan_running(self) -> bool:
+        """Whether the server is scanning its libraries right now (servers that can tell override this)."""
+        return False
+
     def fetch_missing_images(self, item_id: str) -> None:
         """Ask the server to download images the item doesn't have (keeping the ones it has)."""
         raise NotImplementedError

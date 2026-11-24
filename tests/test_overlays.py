@@ -300,3 +300,14 @@ def test_emby_missing_images_asked_once_a_week(ctx, emby, web, monkeypatch):
     ctx.store.put("imgfetch:e1:" + m2, 0)
     run_overlays(ctx, "e1", Job("t"))
     assert [r for r in emby.refreshes if r == (m2, "false")] == [(m2, "false")]
+
+
+def test_waits_for_emby_library_scan(ctx, emby, web, monkeypatch):
+    import app.overlays as ov
+    monkeypatch.setattr(ov, "SCAN_WAIT_POLL", 0)
+    m1, m1b, m2, show, s1, s2 = emby_library(emby)
+    emby.scan_running = 3
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
+    run_overlays(ctx, "e1", Job("t"))
+    assert emby.scan_running == 0          # it asked until the scan was over
+    assert is_ours(emby.images[s1])         # and then carried on normally
