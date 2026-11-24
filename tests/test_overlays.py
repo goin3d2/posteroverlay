@@ -287,7 +287,7 @@ def test_emby_missing_images_fetched(ctx, emby, web, monkeypatch):
     assert [r for r in emby.refreshes if r[1] == "false"] == []
 
 
-def test_emby_missing_images_asked_once_a_week(ctx, emby, web, monkeypatch):
+def test_emby_missing_images_asked_once_a_day(ctx, emby, web, monkeypatch):
     import app.overlays as ov
     monkeypatch.setattr(ov, "MISSING_IMAGES_PACE", 0)
     m1, m1b, m2, *_ = emby_library(emby)

@@ -31,8 +31,8 @@ LIST_WORKERS = 2   # parallel listing requests; more has frozen a busy Emby (4.1
 SCAN_WAIT_POLL = 60   # seconds between checks while the server's library scan runs
 PREVIEW_LIMIT = 200
 DAY = 86400
-MISSING_IMAGES_RETRY = 7 * DAY
-MISSING_IMAGES_PACE = 0.4   # seconds between refresh requests, so the server isn't swamped
+MISSING_IMAGES_RETRY = DAY   # a request the server lost (e.g. a restart) costs a day, not a week
+MISSING_IMAGES_PACE = 1.0   # seconds between refresh requests: Emby queues them in memory, so don't outrun it
 
 
 def _ratings_key(item: Item, kind: str) -> Optional[Tuple[str, str, str]]:
@@ -262,8 +262,9 @@ class OverlayRun:
         due = [it for it in wanted if now - float(asked.get(it.id) or 0) > MISSING_IMAGES_RETRY]
         waiting = len(wanted) - len(due)
         if not due:
-            self.log(f"{len(wanted)} titles have no poster or background; all were asked for in the last week")
+            self.log(f"{len(wanted)} titles have no poster or background; all were asked for in the last day")
             return
+        self._wait_for_library_scan()
         # Movies and shows first (seasons fall back to the show's poster).
         due.sort(key=lambda it: it.kind == "season")
         batch = due[:limit]
@@ -289,7 +290,7 @@ class OverlayRun:
             time.sleep(MISSING_IMAGES_PACE)
         left = len(due) - sent
         self.log(f"{self.server.name}: {sent} titles with no poster or background were refreshed online; "
-                 f"{left} left for later runs, {waiting} asked for in the last week. They get their overlays on the "
+                 f"{left} left for later runs, {waiting} asked for in the last day. They get their overlays on the "
                  "next run")
 
     def _statuses(self, shows: List[Item]) -> Dict[str, str]:
