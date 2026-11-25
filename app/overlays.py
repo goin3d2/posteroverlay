@@ -29,6 +29,8 @@ from .settings import QualityRule, ServerConfig, Settings
 EPISODE_SAMPLE = 10
 LIST_WORKERS = 2   # parallel listing requests; more has frozen a busy Emby (4.11 beta)
 SCAN_WAIT_POLL = 60   # seconds between checks while the server's library scan runs
+SERVER_WAIT = 600     # how long to wait for a server that doesn't answer (restarting) before carrying on
+SERVER_RETRY = 15
 PREVIEW_LIMIT = 200
 DAY = 86400
 # Asking again for a title that's still missing images: after a day (a lost request costs no more), then a
@@ -43,6 +45,11 @@ def _ratings_key(item: Item, kind: str) -> Optional[Tuple[str, str, str]]:
     if item.ids.get("tmdb"):
         return f"mdb:{kind}:tmdb:{item.ids['tmdb']}", "tmdb", item.ids["tmdb"]
     return None
+
+
+def _unreachable(e: Exception) -> bool:
+    """The server didn't answer at all (down, restarting, timed out), as opposed to refusing one request."""
+    return " returned " not in str(e)
 
 
 def _asked(v) -> tuple:
@@ -234,13 +241,27 @@ class OverlayRun:
         self.log(f"MDBList: {fetched} titles updated in {mdb.calls} calls, {len(queue) - fetched} still waiting")
         self.store.put(f"meta:mdblist_waiting:{self.cfg.id}", len(queue) - fetched)
 
+    def _scan_running(self) -> Optional[bool]:
+        """Whether the server is scanning its libraries; None while it doesn't answer (e.g. restarting), after
+        waiting up to SERVER_WAIT for it to come back."""
+        waited = 0.0
+        while not self.job.cancel.is_set():
+            try:
+                return self.server.library_scan_running()
+            except ServerError as e:
+                if waited >= SERVER_WAIT:
+                    self.log(f"{self.server.name} isn't answering ({e}); carrying on", "warn")
+                    return None
+                if not waited:
+                    self.log(f"{self.server.name} isn't answering; waiting up to {SERVER_WAIT // 60} min for it")
+                self.job.cancel.wait(SERVER_RETRY)
+                waited += SERVER_RETRY
+        return None
+
     def _wait_for_library_scan(self) -> None:
-        """Hold the heavy listing while the server scans its libraries: Emby 4.11 has frozen (a deadlock) when
-        many listing requests came in during its library scan."""
-        try:
-            busy = self.server.library_scan_running()
-        except ServerError:
-            return
+        """Hold the heavy listing while the server scans its libraries (Emby 4.11 has frozen, a deadlock, when
+        many listing requests came in during its library scan), and while it's restarting."""
+        busy = self._scan_running()
         if not busy:
             return
         phase = self.job.phase
@@ -249,10 +270,7 @@ class OverlayRun:
         started = time.time()
         while busy and not self.job.cancel.is_set():
             self.job.cancel.wait(SCAN_WAIT_POLL)
-            try:
-                busy = self.server.library_scan_running()
-            except ServerError:
-                busy = False
+            busy = self._scan_running()
         if not self.job.cancel.is_set():
             self.log(f"{self.server.name}'s library scan finished after waiting {int((time.time() - started) / 60)} min")
         self.job.phase = phase
@@ -288,7 +306,7 @@ class OverlayRun:
         job = self.job
         job.phase = "fetching missing posters and backgrounds"
         job.total, job.done = len(batch), 0
-        sent, errors = 0, 0
+        sent, errors, skipped = 0, 0, 0
         for it in batch:
             if job.cancel.is_set():
                 break
@@ -297,18 +315,25 @@ class OverlayRun:
                 sent += 1
                 errors = 0
             except ServerError as e:
-                errors += 1
-                if errors >= 20:
-                    self.log(f"Asking {self.server.name} for missing images stopped after 20 errors in a row: {e}",
-                             "warn")
-                    break
+                if _unreachable(e):
+                    errors += 1
+                    if errors >= 20:
+                        self.log(f"Asking {self.server.name} for missing images stopped: it didn't answer 20 "
+                                 f"times in a row ({e})", "warn")
+                        break
+                    job.done += 1
+                    self.job.cancel.wait(SERVER_RETRY if errors > 3 else MISSING_IMAGES_PACE)
+                    continue   # not asked: due again next run
+                # The title itself was refused (e.g. removed from the library since it was listed): skip it.
+                skipped += 1
             self.store.put(prefix + it.id, [now, asked.get(it.id, (0, 0))[1] + 1])
             job.done += 1
             time.sleep(MISSING_IMAGES_PACE)
-        left = len(due) - sent
+        left = len(due) - sent - skipped
         self.log(f"{self.server.name}: {sent} titles with no poster or background were refreshed online; "
-                 f"{left} left for later runs, {waiting} asked for recently. They get their overlays on the "
-                 "next run")
+                 f"{left} left for later runs, {waiting} asked for recently"
+                 + (f", {skipped} refused by {self.server.name} (no longer in the library?)" if skipped else "")
+                 + ". They get their overlays on the next run")
 
     def _statuses(self, shows: List[Item]) -> Dict[str, str]:
         tmdb = Tmdb(self.settings.tmdb_key)

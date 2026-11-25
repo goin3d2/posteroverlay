@@ -343,3 +343,38 @@ def test_emby_missing_images_back_off(ctx, emby, web, monkeypatch):
     ctx.store.put(key, time.time() - 2 * 86400)
     run_overlays(ctx, "e1", Job("t"))
     assert asks() == 4 and ctx.store.get(key)[1] == 2
+
+
+def test_missing_images_skip_refused_titles(ctx, emby, web, monkeypatch):
+    import app.overlays as ov
+    monkeypatch.setattr(ov, "MISSING_IMAGES_PACE", 0)
+    m1, m1b, m2, *_ = emby_library(emby)
+    emby.images.pop(m2)
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
+    from app.servers.emby import EmbyServer
+    calls = []
+    def refused(self, item_id):
+        calls.append(item_id)
+        raise ov.ServerError(f"Emby: POST /emby/Items/{item_id}/Refresh returned 500: Object reference not set")
+    monkeypatch.setattr(EmbyServer, "fetch_missing_images", refused)
+    run_overlays(ctx, "e1", Job("t"))
+    assert m2 in calls                                   # asked, refused, run carried on
+    assert ctx.store.get("imgfetch:e1:" + m2)[1] == 1    # counted as asked (backs off)
+
+
+def test_waits_for_server_that_is_restarting(ctx, emby, web, monkeypatch):
+    import app.overlays as ov
+    monkeypatch.setattr(ov, "SERVER_RETRY", 0)
+    from app.servers.emby import EmbyServer
+    n = {"i": 0}
+    real = EmbyServer.library_scan_running
+    def flaky(self):
+        n["i"] += 1
+        if n["i"] <= 2:
+            raise ov.ServerError("Emby: GET /emby/ScheduledTasks failed: connection refused")
+        return real(self)
+    monkeypatch.setattr(EmbyServer, "library_scan_running", flaky)
+    m1, m1b, m2, show, s1, s2 = emby_library(emby)
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
+    run_overlays(ctx, "e1", Job("t"))
+    assert n["i"] >= 3 and is_ours(emby.images[s1])
