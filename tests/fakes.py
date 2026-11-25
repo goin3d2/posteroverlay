@@ -365,6 +365,9 @@ class FakePlex(_Server):
         if path.startswith("/library/metadata/"):
             parts = path.split("/")
             rk = parts[3]
+            if "," in rk and len(parts) == 4 and method == "GET":
+                self.multi_calls = getattr(self, "multi_calls", 0) + 1
+                return 200, "", self.mc([self.listing(self.meta[k], detail=True) for k in rk.split(",") if k in self.meta])
             if rk not in self.meta:
                 return 404, "text/plain", b"missing"
             if len(parts) == 4 and method == "GET":

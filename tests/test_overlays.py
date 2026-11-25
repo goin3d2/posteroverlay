@@ -131,6 +131,7 @@ def test_plex_overlays_end_to_end(ctx, plex, web):
     setup(ctx, ServerConfig(id="p1", kind="plex", name="Plex", url=plex.url, token=FakePlex.TOKEN))
     res = run_overlays(ctx, "p1", Job("t"))
     assert "updated 3 posters" in res, res
+    assert getattr(plex, "multi_calls", 0) >= 1          # streams read several titles per call
     key = ctx.store.poster("p1", m1)["applied_key"]
     assert "res_4k" in key and "hdr_dv" in key and "audio_truehd_atmos" in key and "imdb:7.7" in key
     assert "ENDED" in ctx.store.poster("p1", show)["applied_key"]

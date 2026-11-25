@@ -69,6 +69,9 @@ def to_streams(media: dict) -> List[Stream]:
     return out
 
 
+
+STREAM_BATCH = 50   # titles per /library/metadata call when reading streams
+
 class PlexServer(MediaServer):
     kind = "plex"
 
@@ -183,14 +186,24 @@ class PlexServer(MediaServer):
         return out
 
     def file_streams(self, item_ids: List[str]) -> Dict[str, List[List[Stream]]]:
-        # Plex only returns streams in an item's own metadata: one call per title.
+        # Streams are only in an item's own metadata, but Plex returns several items' metadata in one call
+        # (/library/metadata/1,2,3): far faster than one call per title. Falls back to one by one on an error.
         out: Dict[str, List[List[Stream]]] = {}
-        for iid in item_ids:
+        for i in range(0, len(item_ids), STREAM_BATCH):
+            chunk = item_ids[i:i + STREAM_BATCH]
             try:
-                meta = (self._get(f"/library/metadata/{iid}").get("Metadata") or [{}])[0]
+                metas = self._get("/library/metadata/" + ",".join(chunk)).get("Metadata") or []
             except ServerError:
-                continue
-            out[iid] = [to_streams(media) for media in meta.get("Media") or []]
+                metas = []
+                for iid in chunk:
+                    try:
+                        metas += self._get(f"/library/metadata/{iid}").get("Metadata") or []
+                    except ServerError:
+                        continue
+            for meta in metas:
+                rk = str(meta.get("ratingKey") or "")
+                if rk in chunk:
+                    out[rk] = [to_streams(media) for media in meta.get("Media") or []]
         return out
 
     def get_poster(self, item_id: str) -> bytes:
