@@ -387,6 +387,15 @@ class OverlayRun:
                         with lock:
                             down[0] += 1
                         return
+                    continue
+                if kind == "Primary":
+                    # The poster is there now, so this same run can draw its overlay.
+                    try:
+                        it.marker = self.server.poster_marker(it.id) or it.marker
+                    except ServerError:
+                        pass
+                else:
+                    it.has_backdrop = True
             with lock:
                 down[0] = 0
                 processed.add(it.id)

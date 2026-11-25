@@ -401,5 +401,6 @@ def test_missing_images_straight_from_tmdb(ctx, emby, web, monkeypatch):
     assert got == sorted([(m1, "Primary", "p11.jpg"), (m1, "Backdrop", "b11.jpg"), (s2, "Primary", "s2.jpg")]), got
     assert sorted(i for i, r in emby.refreshes if r == "false") == [m2]     # only the one without a TMDB id
     assert ctx.store.get("imgfetch:e1:" + show)[1] == 1                     # nothing on TMDB: asked, backs off
+    assert is_ours(emby.images[m1]) and is_ours(emby.images[s2])           # drawn in the same run
     run_overlays(ctx, "e1", Job("t"))
     assert is_ours(emby.images[m1]) and is_ours(emby.images[s2]) and is_ours(emby.images[m2])
