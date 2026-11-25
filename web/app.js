@@ -199,6 +199,7 @@ function renderGeneral() {
     ["mdblist_reserve", "Keep this many MDBList requests spare each day", "number"],
     ["mdblist_per_run", "Most MDBList lookups per run", "number", null, "Keeps runs short; titles not reached get their Rotten Tomatoes scores on later runs. 0: no limit"],
     ["imdb_dataset", "IMDb ratings from the IMDb dataset", "check", null, "Free daily file; saves MDBList requests"],
+    ["missing_images_per_second", "Missing posters and backgrounds: requests per second", "number", null, "How fast to ask Emby; it works through them in the background, so keep this modest (1–2)"],
     ["missing_images_per_run", "Fetch missing posters and backgrounds, at most this many titles per run", "number", null, "Emby only: titles with no poster or background are refreshed online (nothing is replaced); asked again after a day, a week, then monthly. 0: off"],
   ]));
   const imp = document.createElement("fieldset");

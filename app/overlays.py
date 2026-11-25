@@ -36,7 +36,7 @@ DAY = 86400
 # Asking again for a title that's still missing images: after a day (a lost request costs no more), then a
 # week, then a month (the image source most likely has nothing for it).
 MISSING_IMAGES_RETRY = (DAY, 7 * DAY, 30 * DAY)
-MISSING_IMAGES_PACE = 1.0   # seconds between refresh requests: Emby queues them in memory, so don't outrun it
+MISSING_IMAGES_PACE = 1.0   # default seconds between refresh requests (setting missing_images_per_second)
 
 
 def _ratings_key(item: Item, kind: str) -> Optional[Tuple[str, str, str]]:
@@ -307,6 +307,8 @@ class OverlayRun:
         job.phase = "fetching missing posters and backgrounds"
         job.total, job.done = len(batch), 0
         sent, errors, skipped = 0, 0, 0
+        per_sec = float(getattr(self.settings, "missing_images_per_second", 0) or 0)
+        pace = min(MISSING_IMAGES_PACE, 1.0 / per_sec) if per_sec > 0 else MISSING_IMAGES_PACE
         for it in batch:
             if job.cancel.is_set():
                 break
@@ -322,13 +324,13 @@ class OverlayRun:
                                  f"times in a row ({e})", "warn")
                         break
                     job.done += 1
-                    self.job.cancel.wait(SERVER_RETRY if errors > 3 else MISSING_IMAGES_PACE)
+                    self.job.cancel.wait(SERVER_RETRY if errors > 3 else pace)
                     continue   # not asked: due again next run
                 # The title itself was refused (e.g. removed from the library since it was listed): skip it.
                 skipped += 1
             self.store.put(prefix + it.id, [now, asked.get(it.id, (0, 0))[1] + 1])
             job.done += 1
-            time.sleep(MISSING_IMAGES_PACE)
+            time.sleep(pace)
         left = len(due) - sent - skipped
         self.log(f"{self.server.name}: {sent} titles with no poster or background were refreshed online; "
                  f"{left} left for later runs, {waiting} asked for recently"

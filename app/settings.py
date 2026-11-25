@@ -249,6 +249,8 @@ class Settings(BaseModel):
     # Titles with no poster or background (e.g. the file was deleted): ask the server to download them, at most
     # this many per run, one a second; a title still missing images is asked again after a day, a week, then every month. 0: off.
     missing_images_per_run: int = 20000
+    # How many of those refresh requests to send per second (Emby queues them in memory; don't outrun it).
+    missing_images_per_second: float = 1.0
     # Posters drawn and uploaded at the same time.
     overlay_workers: int = 4
     style: Style = Field(default_factory=Style)
