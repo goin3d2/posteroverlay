@@ -57,6 +57,7 @@ REFRESH_POLL = 1.5
 class EmbyServer(MediaServer):
     kind = "emby"
     can_fetch_images = True
+    can_download_images = True
 
     def _headers(self):
         return {"X-Emby-Token": self.token, "Accept": "application/json"}
@@ -220,6 +221,11 @@ class EmbyServer(MediaServer):
                 if t.get("State") == "Running":
                     return True
         return False
+
+    def download_image(self, item_id: str, kind: str, url: str) -> None:
+        # Emby fetches the picture straight away and keeps it in its own metadata (not the media folder).
+        self._request("POST", self._base() + f"/Items/{item_id}/RemoteImages/Download", params={
+            "Type": kind, "ProviderName": "TheMovieDb", "ImageUrl": url}, expect_json=False)
 
     def fetch_missing_images(self, item_id: str) -> None:
         # Emby's "Search for missing metadata": fills in what's missing, replaces nothing. Emby works through it in

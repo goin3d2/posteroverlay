@@ -277,6 +277,7 @@ def test_emby_missing_images_fetched(ctx, emby, web, monkeypatch):
     emby.no_backdrop.add(m1)
     emby.online[s2] = emby.images.pop(s2)
     setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
+    s = ctx.settings.get(); s.tmdb_key = ""; ctx.settings.save(s)    # no TMDB: Emby's own refresh for all
     run_overlays(ctx, "e1", Job("t"))
     asked = sorted(i for i, r in emby.refreshes if r == "false")
     assert asked == sorted([m2, m1, s2])
@@ -378,3 +379,26 @@ def test_waits_for_server_that_is_restarting(ctx, emby, web, monkeypatch):
     setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
     run_overlays(ctx, "e1", Job("t"))
     assert n["i"] >= 3 and is_ours(emby.images[s1])
+
+
+
+def test_missing_images_straight_from_tmdb(ctx, emby, web, monkeypatch):
+    import app.overlays as ov
+    monkeypatch.setattr(ov, "MISSING_IMAGES_PACE", 0)
+    m1, m1b, m2, show, s1, s2 = emby_library(emby)
+    emby.images.pop(m1)                      # movie (TMDB 11): no poster, no background; TMDB has both
+    emby.no_backdrop.add(m1)
+    emby.online[m2] = emby.images.pop(m2)    # movie without a TMDB id: Emby's own refresh
+    emby.no_backdrop.add(show)               # show (TMDB 33): no background, and TMDB has none either
+    emby.images.pop(s2)                      # season 2: no poster; TMDB has a season poster
+    web.tmdb_movies["11"] = {"poster_path": "/p11.jpg", "backdrop_path": "/b11.jpg"}
+    web.tmdb_tv["33"] = {"status": "Returning Series", "backdrop_path": None}
+    web.tmdb_seasons[("33", "2")] = {"poster_path": "/s2.jpg"}
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
+    run_overlays(ctx, "e1", Job("t"))
+    got = sorted((i, t, u.rsplit("/", 1)[-1]) for i, t, u in emby.downloads)
+    assert got == sorted([(m1, "Primary", "p11.jpg"), (m1, "Backdrop", "b11.jpg"), (s2, "Primary", "s2.jpg")]), got
+    assert sorted(i for i, r in emby.refreshes if r == "false") == [m2]     # only the one without a TMDB id
+    assert ctx.store.get("imgfetch:e1:" + show)[1] == 1                     # nothing on TMDB: asked, backs off
+    run_overlays(ctx, "e1", Job("t"))
+    assert is_ours(emby.images[m1]) and is_ours(emby.images[s2]) and is_ours(emby.images[m2])

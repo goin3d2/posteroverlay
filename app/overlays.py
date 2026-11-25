@@ -37,6 +37,8 @@ DAY = 86400
 # week, then a month (the image source most likely has nothing for it).
 MISSING_IMAGES_RETRY = (DAY, 7 * DAY, 30 * DAY)
 MISSING_IMAGES_PACE = 1.0   # default seconds between refresh requests (setting missing_images_per_second)
+DIRECT_IMAGE_WORKERS = 3    # images fetched from TMDB and handed to the server at the same time
+TMDB_IMAGE = "https://image.tmdb.org/t/p/original"
 
 
 def _ratings_key(item: Item, kind: str) -> Optional[Tuple[str, str, str]]:
@@ -306,6 +308,9 @@ class OverlayRun:
         job = self.job
         job.phase = "fetching missing posters and backgrounds"
         job.total, job.done = len(batch), 0
+        # First the quick way: look the images up on TMDB and have the server download just those (a second or
+        # less each, nothing queued). Only titles that can't be done that way get a full refresh below.
+        batch, direct = self._direct_images(batch, shows, prefix, asked, now)
         sent, errors, skipped = 0, 0, 0
         per_sec = float(getattr(self.settings, "missing_images_per_second", 0) or 0)
         pace = min(MISSING_IMAGES_PACE, 1.0 / per_sec) if per_sec > 0 else MISSING_IMAGES_PACE
@@ -331,11 +336,70 @@ class OverlayRun:
             self.store.put(prefix + it.id, [now, asked.get(it.id, (0, 0))[1] + 1])
             job.done += 1
             time.sleep(pace)
-        left = len(due) - sent - skipped
+        left = len(due) - sent - skipped - direct["done"] - direct["none"]
+        if direct["done"] or direct["none"]:
+            self.log(f"{self.server.name}: {direct['done']} titles got their missing poster or background straight "
+                     f"from TMDB ({direct['images']} images); TMDB has none for {direct['none']}")
         self.log(f"{self.server.name}: {sent} titles with no poster or background were refreshed online; "
                  f"{left} left for later runs, {waiting} asked for recently"
                  + (f", {skipped} refused by {self.server.name} (no longer in the library?)" if skipped else "")
                  + ". They get their overlays on the next run")
+
+    def _direct_images(self, batch: List[Item], shows: List[Item], prefix: str, asked: dict, now: float):
+        """Fetch what's missing from TMDB directly. Returns (titles still to refresh, counts)."""
+        counts = {"done": 0, "none": 0, "images": 0}
+        if not self.server.can_download_images or not self.settings.tmdb_key:
+            return batch, counts
+        tmdb = Tmdb(self.settings.tmdb_key)
+        show_tmdb = {sh.id: sh.ids.get("tmdb") for sh in shows}
+        lock = threading.Lock()
+        processed = set()
+        down = [0]
+
+        def lookup(it: Item) -> Optional[dict]:
+            if it.kind == "movie" and it.ids.get("tmdb"):
+                return tmdb._get(f"movie/{it.ids['tmdb']}")
+            if it.kind == "show" and it.ids.get("tmdb"):
+                return tmdb._get(f"tv/{it.ids['tmdb']}")
+            if it.kind == "season" and show_tmdb.get(it.parent) and it.index is not None:
+                return tmdb._get(f"tv/{show_tmdb[it.parent]}/season/{it.index}")
+            raise LookupError("no TMDB id")
+
+        def one(it: Item) -> None:
+            if self.job.cancel.is_set() or down[0] >= 20:
+                return
+            try:
+                info = lookup(it) or {}
+            except Exception:
+                return                    # no TMDB id or TMDB unavailable: the server's own refresh instead
+            want = []
+            if not it.marker and info.get("poster_path"):
+                want.append(("Primary", info["poster_path"]))
+            if it.has_backdrop is False and info.get("backdrop_path"):
+                want.append(("Backdrop", info["backdrop_path"]))
+            got = 0
+            for kind, path in want:
+                try:
+                    self.server.download_image(it.id, kind, TMDB_IMAGE + path)
+                    got += 1
+                except ServerError as e:
+                    if _unreachable(e):
+                        with lock:
+                            down[0] += 1
+                        return
+            with lock:
+                down[0] = 0
+                processed.add(it.id)
+                counts["images"] += got
+                counts["done" if got else "none"] += 1
+                self.job.done += 1
+            self.store.put(prefix + it.id, [now, asked.get(it.id, (0, 0))[1] + 1])
+
+        with ThreadPoolExecutor(DIRECT_IMAGE_WORKERS, thread_name_prefix="images") as pool:
+            list(pool.map(one, batch))
+        if down[0] >= 20:
+            self.log(f"{self.server.name} stopped answering while images were being fetched", "warn")
+        return [it for it in batch if it.id not in processed], counts
 
     def _statuses(self, shows: List[Item]) -> Dict[str, str]:
         tmdb = Tmdb(self.settings.tmdb_key)

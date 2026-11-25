@@ -76,6 +76,7 @@ class MediaServer:
 
     kind = "base"
     can_fetch_images = False   # the server can be asked to download missing images
+    can_download_images = False   # ... or to download a given image URL
 
     def __init__(self, server_id: str, name: str, url: str, token: str, libraries: Sequence[str] = ()):
         self.server_id = server_id
@@ -94,6 +95,10 @@ class MediaServer:
 
     def fetch_missing_images(self, item_id: str) -> None:
         """Ask the server to download images the item doesn't have (keeping the ones it has)."""
+        raise NotImplementedError
+
+    def download_image(self, item_id: str, kind: str, url: str) -> None:
+        """Have the server download one image from `url` as the item's "Primary" or "Backdrop"."""
         raise NotImplementedError
 
     # ---- plumbing

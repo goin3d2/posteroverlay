@@ -23,6 +23,8 @@ class FakeWeb(requests.adapters.BaseAdapter):
         super().__init__()
         self.tmdb_tv = {}         # tmdb id -> {"status":..., "last_episode_to_air":..., ...}
         self.tmdb_collections = {}
+        self.tmdb_movies = {}     # tmdb id -> {"poster_path":..., "backdrop_path":...}
+        self.tmdb_seasons = {}    # (show tmdb id, season) -> {"poster_path":...}
         self.mdb_titles = {}      # "imdb:tt1" -> ratings list
         self.mdb_lists = {}       # list path -> items
         self.mdb_quota = (25000, 0)
@@ -38,7 +40,13 @@ class FakeWeb(requests.adapters.BaseAdapter):
         status, body, headers = 404, b"{}", {}
         if u.netloc == "api.themoviedb.org":
             parts = u.path.split("/")
-            if parts[2] == "tv" and parts[3] in self.tmdb_tv:
+            if parts[2] == "movie" and parts[3] in self.tmdb_movies:
+                status, body = 200, json.dumps(self.tmdb_movies[parts[3]]).encode()
+            elif parts[2] == "tv" and len(parts) > 5 and parts[4] == "season":
+                key = (parts[3], parts[5])
+                if key in self.tmdb_seasons:
+                    status, body = 200, json.dumps(self.tmdb_seasons[key]).encode()
+            elif parts[2] == "tv" and parts[3] in self.tmdb_tv:
                 status, body = 200, json.dumps(self.tmdb_tv[parts[3]]).encode()
             elif parts[2] == "collection" and parts[3] in self.tmdb_collections:
                 status, body = 200, json.dumps(self.tmdb_collections[parts[3]]).encode()

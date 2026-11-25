@@ -87,6 +87,7 @@ class FakeEmby(_Server):
         self.refreshes = []
         self.no_backdrop = set()    # items with no background image
         self.scan_running = 0       # answer 'library scan running' this many more times
+        self.downloads = []         # (item id, image type, url) from RemoteImages/Download
         self.online = {}            # items with no poster that a refresh would download: id -> image
         self.home = {"u1": [{"Id": "s1", "SectionType": "resume"}], "u2": []}   # user -> home sections
         self.next_id = 1000
@@ -174,6 +175,15 @@ class FakeEmby(_Server):
             if iid in self.readonly:
                 return 500, "text/plain", f"Access to the path '/vod/{iid}/poster.jpg' is denied.".encode()
             self.set_image(iid, base64.b64decode(body))
+            return 204, "text/plain", b""
+        if p.startswith("/Items/") and p.endswith("/RemoteImages/Download") and method == "POST":
+            iid = p.split("/")[2]
+            self.downloads.append((iid, q.get("Type"), q.get("ImageUrl")))
+            if q.get("Type") == "Primary":
+                self.set_image(iid, poster_bytes((70, 110, 70)))
+                self.online.pop(iid, None)
+            elif q.get("Type") == "Backdrop":
+                self.no_backdrop.discard(iid)
             return 204, "text/plain", b""
         if p.startswith("/Items/") and p.endswith("/Refresh") and method == "POST":
             iid = p.split("/")[2]
