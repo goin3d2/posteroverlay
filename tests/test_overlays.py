@@ -1,4 +1,5 @@
 import os
+import time
 
 from app.context import Job
 from app.overlays import restore_all, run_overlays
@@ -311,3 +312,34 @@ def test_waits_for_emby_library_scan(ctx, emby, web, monkeypatch):
     run_overlays(ctx, "e1", Job("t"))
     assert emby.scan_running == 0          # it asked until the scan was over
     assert is_ours(emby.images[s1])         # and then carried on normally
+
+
+def test_emby_missing_images_back_off(ctx, emby, web, monkeypatch):
+    import app.overlays as ov
+    monkeypatch.setattr(ov, "MISSING_IMAGES_PACE", 0)
+    m1, m1b, m2, *_ = emby_library(emby)
+    emby.images.pop(m2)          # nothing online for it
+    setup(ctx, ServerConfig(id="e1", kind="emby", name="Emby", url=emby.url, token=FakeEmby.TOKEN))
+    asks = lambda: len([r for r in emby.refreshes if r == (m2, "false")])
+    key = "imgfetch:e1:" + m2
+    run_overlays(ctx, "e1", Job("t"))
+    assert asks() == 1 and ctx.store.get(key)[1] == 1
+    # Asked once, 2 days ago: due again (after a day).
+    ctx.store.put(key, [time.time() - 2 * 86400, 1])
+    run_overlays(ctx, "e1", Job("t"))
+    assert asks() == 2 and ctx.store.get(key)[1] == 2
+    # Asked twice, 2 days ago: not due yet (a week).
+    ctx.store.put(key, [time.time() - 2 * 86400, 2])
+    run_overlays(ctx, "e1", Job("t"))
+    assert asks() == 2
+    # Asked three times, 20 days ago: still not due (a month); 31 days ago: due.
+    ctx.store.put(key, [time.time() - 20 * 86400, 3])
+    run_overlays(ctx, "e1", Job("t"))
+    assert asks() == 2
+    ctx.store.put(key, [time.time() - 31 * 86400, 3])
+    run_overlays(ctx, "e1", Job("t"))
+    assert asks() == 3
+    # An entry from the old format (just a time) counts as asked once.
+    ctx.store.put(key, time.time() - 2 * 86400)
+    run_overlays(ctx, "e1", Job("t"))
+    assert asks() == 4 and ctx.store.get(key)[1] == 2

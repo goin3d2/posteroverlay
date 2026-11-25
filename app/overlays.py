@@ -31,7 +31,9 @@ LIST_WORKERS = 2   # parallel listing requests; more has frozen a busy Emby (4.1
 SCAN_WAIT_POLL = 60   # seconds between checks while the server's library scan runs
 PREVIEW_LIMIT = 200
 DAY = 86400
-MISSING_IMAGES_RETRY = DAY   # a request the server lost (e.g. a restart) costs a day, not a week
+# Asking again for a title that's still missing images: after a day (a lost request costs no more), then a
+# week, then a month (the image source most likely has nothing for it).
+MISSING_IMAGES_RETRY = (DAY, 7 * DAY, 30 * DAY)
 MISSING_IMAGES_PACE = 1.0   # seconds between refresh requests: Emby queues them in memory, so don't outrun it
 
 
@@ -41,6 +43,16 @@ def _ratings_key(item: Item, kind: str) -> Optional[Tuple[str, str, str]]:
     if item.ids.get("tmdb"):
         return f"mdb:{kind}:tmdb:{item.ids['tmdb']}", "tmdb", item.ids["tmdb"]
     return None
+
+
+def _asked(v) -> tuple:
+    """(when, how many times) a title's missing images were last asked for; older entries hold just the time."""
+    if isinstance(v, list) and len(v) == 2:
+        return float(v[0]), int(v[1])
+    try:
+        return float(v), 1
+    except (TypeError, ValueError):
+        return 0.0, 0
 
 
 class OverlayRun:
@@ -257,16 +269,21 @@ class OverlayRun:
         if not wanted:
             return
         prefix = f"imgfetch:{self.cfg.id}:"
-        asked = self.store.get_prefix(prefix)
+        asked = {k: _asked(v) for k, v in self.store.get_prefix(prefix).items()}
         now = time.time()
-        due = [it for it in wanted if now - float(asked.get(it.id) or 0) > MISSING_IMAGES_RETRY]
+
+        def is_due(it):
+            when, times = asked.get(it.id, (0.0, 0))
+            return not times or now - when > MISSING_IMAGES_RETRY[min(times, len(MISSING_IMAGES_RETRY)) - 1]
+        due = [it for it in wanted if is_due(it)]
         waiting = len(wanted) - len(due)
         if not due:
-            self.log(f"{len(wanted)} titles have no poster or background; all were asked for in the last day")
+            self.log(f"{len(wanted)} titles have no poster or background; all were asked for recently")
             return
         self._wait_for_library_scan()
-        # Movies and shows first (seasons fall back to the show's poster).
-        due.sort(key=lambda it: it.kind == "season")
+        # What shows most first: movies and shows with no poster, then those missing only a background, then
+        # seasons (which fall back to the show's poster); titles never asked before ahead of ones asked already.
+        due.sort(key=lambda it: (it.kind == "season", bool(it.marker), asked.get(it.id, (0, 0))[1]))
         batch = due[:limit]
         job = self.job
         job.phase = "fetching missing posters and backgrounds"
@@ -285,12 +302,12 @@ class OverlayRun:
                     self.log(f"Asking {self.server.name} for missing images stopped after 20 errors in a row: {e}",
                              "warn")
                     break
-            self.store.put(prefix + it.id, now)
+            self.store.put(prefix + it.id, [now, asked.get(it.id, (0, 0))[1] + 1])
             job.done += 1
             time.sleep(MISSING_IMAGES_PACE)
         left = len(due) - sent
         self.log(f"{self.server.name}: {sent} titles with no poster or background were refreshed online; "
-                 f"{left} left for later runs, {waiting} asked for in the last day. They get their overlays on the "
+                 f"{left} left for later runs, {waiting} asked for recently. They get their overlays on the "
                  "next run")
 
     def _statuses(self, shows: List[Item]) -> Dict[str, str]:
